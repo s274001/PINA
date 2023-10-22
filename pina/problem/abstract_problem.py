@@ -1,6 +1,7 @@
 """ Module for AbstractProblem class """
 from abc import ABCMeta, abstractmethod
 from ..utils import merge_tensors, check_consistency
+from ..equation import ParametricEquation
 import torch
 
 
@@ -25,7 +26,7 @@ class AbstractProblem(metaclass=ABCMeta):
 
         # put in self.input_pts all the points that we don't need to sample
         self._span_condition_points()
-      
+
     @property
     def input_variables(self):
         """
@@ -106,10 +107,28 @@ class AbstractProblem(metaclass=ABCMeta):
                 samples = condition.input_points
             elif hasattr(condition, 'output_points') and hasattr(condition, 'input_points'):
                 samples = (condition.input_points, condition.output_points)
+            pass
+            if hasattr(condition, 'equation') and isinstance(condition.equation,
+                    ParametricEquation):
+                # initialize the unknown parameters of the inverse problem given
+                # the domain the user gives
+                ranges_params = torch.tensor([
+                    (self.unknown_parameters_domain.range_[i][1]-
+                    self.unknown_parameters_domain.range_[i][0])
+                    for i in self.unknown_variables])
+                min_params = torch.tensor([
+                    self.unknown_parameters_domain.range_[i][0]
+                    for i in self.unknown_variables])
+                init_params = torch.rand(len(self.unknown_variables),
+                    requires_grad=True) * ranges_params + min_params
+
+                self.unknown_parameters = torch.nn.Parameter(init_params)
+            pass
             # skip if we need to sample
-            elif hasattr(condition, 'location'):
+            if hasattr(condition, 'location'):
                 self._have_sampled_points[condition_name] = False
                 continue
+
             self.input_pts[condition_name] = samples
 
     def discretise_domain(self, n, mode = 'random', variables = 'all', locations = 'all'):
@@ -149,17 +168,17 @@ class AbstractProblem(metaclass=ABCMeta):
         check_consistency(mode, str)
         if mode not in ['random', 'grid', 'lh', 'chebyshev', 'latin']:
             raise TypeError(f'mode {mode} not valid.')
-        
+
         # check consistency variables
         if variables == 'all':
             variables = self.input_variables
         else:
             check_consistency(variables, str)
-        
+
         if sorted(variables) !=  sorted(self.input_variables):
             TypeError(f'Wrong variables for sampling. Variables ',
                       f'should be in {self.input_variables}.')
-            
+
         # check consistency location
         if locations == 'all':
             locations = [condition for condition in self.conditions]
@@ -177,7 +196,7 @@ class AbstractProblem(metaclass=ABCMeta):
             # we try to check if we have already sampled
             try:
                 already_sampled = [self.input_pts[location]]
-            # if we have not sampled, a key error is thrown 
+            # if we have not sampled, a key error is thrown
             except KeyError:
                 already_sampled = []
 
@@ -199,7 +218,7 @@ class AbstractProblem(metaclass=ABCMeta):
             self.input_pts[location] = pts
 
             # the condition is sampled if input_pts contains all labels
-            if sorted(self.input_pts[location].labels) ==  sorted(self.input_variables): 
+            if sorted(self.input_pts[location].labels) ==  sorted(self.input_variables):
                 self._have_sampled_points[location] = True
 
     def add_points(self, new_points):
@@ -213,7 +232,7 @@ class AbstractProblem(metaclass=ABCMeta):
         if sorted(new_points.keys()) !=  sorted(self.conditions):
             TypeError(f'Wrong locations for new points. Location ',
                       f'should be in {self.conditions}.')
-            
+
         for location in new_points.keys():
             # extract old and new points
             old_pts = self.input_pts[location]
@@ -235,14 +254,14 @@ class AbstractProblem(metaclass=ABCMeta):
     @property
     def have_sampled_points(self):
         """
-        Check if all points for 
+        Check if all points for
         ``'Location'`` are sampled.
-        """ 
+        """
         return all(self._have_sampled_points.values())
-    
+
     @property
     def not_sampled_points(self):
-        """Check which points are 
+        """Check which points are
         not sampled.
         """
         # variables which are not sampled
@@ -254,4 +273,4 @@ class AbstractProblem(metaclass=ABCMeta):
                 if not is_sample:
                     not_sampled.append(condition_name)
         return not_sampled
-            
+
