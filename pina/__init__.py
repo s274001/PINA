@@ -2,6 +2,7 @@ __all__ = [
     'PINN',
     'Trainer',
     'LabelTensor',
+    'LabelParameter',
     'Plotter',
     'Condition',
     'Location',
@@ -10,6 +11,7 @@ __all__ = [
 
 from .meta import *
 from .label_tensor import LabelTensor
+from .label_parameter import LabelParameter
 from .solvers.pinn import PINN
 from .trainer import Trainer
 from .plotter import Plotter

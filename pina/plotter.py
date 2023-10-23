@@ -187,8 +187,9 @@ class Plotter:
             plt.savefig(filename)
         else:
             plt.show()
+        plt.close()
 
-    def plot_loss(self, trainer, metric=None, label=None, log_scale=True):
+    def plot_loss(self, trainer, metric=None, label=None, log_scale=True, filename=None):
         """
         Plot the loss function values during traininig.
 
@@ -223,3 +224,7 @@ class Plotter:
             plt.yscale('log')
         plt.xlabel('epoch')
         plt.ylabel(metric)
+        plt.show()
+        if filename:
+            plt.savefig(filename)
+        plt.close()

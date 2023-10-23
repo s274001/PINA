@@ -2,6 +2,7 @@
 from abc import ABCMeta, abstractmethod
 from ..utils import merge_tensors, check_consistency
 from ..equation import ParametricEquation
+from ..label_parameter import LabelParameter
 import torch
 
 
@@ -113,16 +114,17 @@ class AbstractProblem(metaclass=ABCMeta):
                 # initialize the unknown parameters of the inverse problem given
                 # the domain the user gives
                 ranges_params = torch.tensor([
-                    (self.unknown_parameters_domain.range_[i][1]-
-                    self.unknown_parameters_domain.range_[i][0])
+                    (self.unknown_parameter_domain.range_[i][1]-
+                    self.unknown_parameter_domain.range_[i][0])
                     for i in self.unknown_variables])
                 min_params = torch.tensor([
-                    self.unknown_parameters_domain.range_[i][0]
+                    self.unknown_parameter_domain.range_[i][0]
                     for i in self.unknown_variables])
                 init_params = torch.rand(len(self.unknown_variables),
                     requires_grad=True) * ranges_params + min_params
 
-                self.unknown_parameters = torch.nn.Parameter(init_params)
+                self.unknown_parameters = LabelParameter(init_params,
+                        labels=self.unknown_variables)
             pass
             # skip if we need to sample
             if hasattr(condition, 'location'):
