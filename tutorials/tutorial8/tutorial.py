@@ -92,7 +92,6 @@ poisson_problem = SnapshotProblem()
 # ## POD-RBF reduced order model
 
 # Then, we define the model we want to use, with the POD (`PODBlock`) and the RBF (`RBFBlock`) objects.
-
 # In[5]:
 
 
@@ -109,7 +108,6 @@ class PODRBF(torch.nn.Module):
 
         self.pod = PODBlock(pod_rank)
         self.rbf = RBFBlock(kernel=rbf_kernel)
-
 
     def forward(self, x):
         """
