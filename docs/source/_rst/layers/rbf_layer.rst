@@ -1,5 +1,7 @@
 RBFBlock
-======================
+.. currentmodule:: pina.model.layers.rbf_layer
+
+.. autoclass:: RBFBlock
 .. currentmodule:: pina.model.layers.rbf_layer
 
 .. autoclass:: RBFBlock
