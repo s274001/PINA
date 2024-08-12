@@ -45,6 +45,17 @@ class CorrectedROM(SupervisedSolver):
 
         self.modes = reduction_network.basis
 
+        # compute the coefficients of expansion wrt small POD basis
+        # then use the mean and variance of such coefficients to 
+        # shift and rescale the corrected coefficients in the 
+        # reduction network
+       # coeff = reduction_network.reduce(problem.conditions["data"].output_points)
+       # mean = torch.mean(coeff, dim=0)
+       # std = torch.std(coeff, dim=0)
+       # correction_network.coeff_corr.data *= std
+       # correction_network.coeff_corr.data += mean
+
+
     def test_coeff_corr(self, input_pts):
         corr_net = self.neural_net["correction_network"]
         interp = corr_net.params2correction
@@ -59,7 +70,7 @@ class CorrectedROM(SupervisedSolver):
         reduction_network = self.neural_net["reduction_network"]
         interpolation_network = self.neural_net["interpolation_network"]
         correction_network = self.neural_net["correction_network"]
-        modes = reduction_network.basis
+        modes = reduction_network.basis  ## do not really need this I think
         coeff = interpolation_network(input_pts)
         pod_term = reduction_network.expand(coeff)
         if test:
@@ -70,7 +81,7 @@ class CorrectedROM(SupervisedSolver):
         return pod_term + correction_term
 
     def loss_data(self, input_pts, output_pts):
-        approx_correction = self.neural_net["correction_network"](input_pts)
+        approx_correction = self.neural_net["correction_network"](input_pts,self.neural_net["correction_network"].coeff_corr)
         exact_correction = self.problem.conditions["correction"].output_points
         loss_correction = self.loss(approx_correction, exact_correction)
         #approx_prediction = self(input_pts)

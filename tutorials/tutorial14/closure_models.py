@@ -122,14 +122,15 @@ class DeepONetCorrNet(BaseCorrNet):
         Compute the transformed modes from the DeepONet and reshape them.
         '''
         # build the input for the DeepONet
+        ## repeat the coordinates reduced_dim times as columns
         coords = LabelTensor(self.coords.repeat(self.reduced_dim, 1),
                 ['x', 'y'])
-        modes = torch.vstack((self.modes[:, 0],
-            self.modes[:, 1],
-            self.modes[:, 2]))
+        ## the modes here are stored in columns, so concatenate those in a long column
+        modes = torch.vstack([self.modes[:, i] for i in range(self.reduced_dim)])
+        ## append concatenates along the 1st direction. So we have (x,y.mode)
         input_deeponet = coords.append(LabelTensor(modes, 'modes'))
         # compute the transformed modes and reshape them
-        transf_modes = (self.deeponet(input_deeponet) +
+        transf_modes = (self.deeponet(input_deeponet).reshape(-1,1) +
                 input_deeponet.extract(['modes']))
         transf_modes = transf_modes.reshape(
                 self.reduced_dim, transf_modes.shape[0]//self.reduced_dim).T
@@ -143,6 +144,150 @@ class DeepONetCorrNet(BaseCorrNet):
         '''
         #coeff_corr = self.nn_coeffs(param)
         transf_modes = self.transformed_modes
+        approx_correction = torch.matmul(transf_modes, coeff_corr.T).T
+        if approx_correction.dim() == 1:
+            approx_correction = approx_correction.unsqueeze(0)
+        if self.scaler is not None:
+            approx_correction = self.scaler.inverse_transform(approx_correction)
+        return approx_correction
+
+class DeepONetCorrNet_Linear(BaseCorrNet):
+    '''
+    Build a DeepONet model that transform the POD modes, taking as input the
+    POD modes and the x coordinates, and output the exact correction, built as
+    (learnable coefficients)@(transformed_modes), where the transformed modes
+    are the actual output of the DeepONet.
+    '''
+    def __init__(self, pod, coords, num_params=400, interp=RBFLayer(),
+            scaler=None):
+        super().__init__(pod, interp=interp, scaler=scaler)
+        self.coords = coords
+        trunk_net = FeedForward(
+                input_dimensions=self.reduced_dim,
+                output_dimensions=20,
+                layers=[20, 20, 20],
+                func=torch.nn.Softplus,
+                )
+        branch_net = FeedForward(
+                input_dimensions=2,
+                output_dimensions=20,
+                layers=[20, 20, 20],
+                func=torch.nn.Softplus,
+                )
+#        self.nn_coeffs = FeedForward(
+#                input_dimensions=1,
+#                output_dimensions=self.reduced_dim,
+#                layers=[5, 5, 5, 5],
+#                func=torch.nn.Softplus,
+#                )
+        self.deeponet = DeepONet(branch_net, trunk_net, ['x','y'], [f'mode_{i}' for i in range(self.reduced_dim)],reduction=torch.nn.Linear(20,self.reduced_dim))
+        self.coeff_corr = torch.nn.Parameter(torch.randn(num_params, self.reduced_dim))
+
+    def fit(self, params, corrections):
+        '''
+        Fit the scaler if not None.
+        '''
+        if self.scaler is not None:
+            corrections = self.scaler.fit_transform(corrections)
+
+    @property
+    def transformed_modes(self):
+        '''
+        Compute the transformed modes from the DeepONet and reshape them.
+        '''
+        # build the input for the DeepONet
+        coords = LabelTensor(self.coords,['x', 'y'])
+        modes = LabelTensor(self.modes, [f'mode_{i}' for i in range(self.reduced_dim)])
+        input_deeponet = coords.append(modes) 
+        # compute the transformed modes and reshape them
+        transf_modes = self.deeponet(input_deeponet) 
+        #transf_modes = transf_modes.reshape(
+        #        self.reduced_dim, transf_modes.shape[0]//self.reduced_dim).T
+        return transf_modes
+
+
+    def forward(self, param, coeff_corr):
+        '''
+        Compute the correction term, by multiplying the transformed modes
+        with the learnable coefficients.
+        '''
+        #coeff_corr = self.nn_coeffs(param)
+        transf_modes = self.transformed_modes
+        approx_correction = torch.matmul(transf_modes, coeff_corr.T).T
+        if approx_correction.dim() == 1:
+            approx_correction = approx_correction.unsqueeze(0)
+        if self.scaler is not None:
+            approx_correction = self.scaler.inverse_transform(approx_correction)
+        return approx_correction
+
+class DeepONetCorrNet_NN(BaseCorrNet):
+    '''
+    Build a DeepONet model that transform the POD modes, taking as input the
+    POD modes and the x coordinates, and output the exact correction, built as
+    (learnable coefficients)@(transformed_modes), where the transformed modes
+    are the actual output of the DeepONet.
+    '''
+    def __init__(self, pod, coords, num_params=400, interp=RBFLayer(),
+            scaler=None):
+        super().__init__(pod, interp=interp, scaler=scaler)
+        self.coords = coords
+        trunk_net = FeedForward(
+                input_dimensions=self.reduced_dim,
+                output_dimensions=10,
+                layers=[20, 20, 20],
+                func=torch.nn.Softplus,
+                )
+        branch_net = FeedForward(
+                input_dimensions=2,
+                output_dimensions=10,
+                layers=[20, 20, 20],
+                func=torch.nn.Softplus,
+                )
+#        self.nn_coeffs = FeedForward(
+#                input_dimensions=1,
+#                output_dimensions=self.reduced_dim,
+#                layers=[5, 5, 5, 5],
+#                func=torch.nn.Softplus,
+#                )
+        self.deeponet = DeepONet(branch_net, trunk_net, ['x','y'], [f'mode_{i}' for i in range(self.reduced_dim)],reduction=torch.nn.Linear(10,self.reduced_dim))
+        self.coeff_net = FeedForward(
+                    input_dimensions=self.reduced_dim,
+                    output_dimensions=self.reduced_dim,
+                    layers=[5,5,5],
+                    func=torch.nn.Softplus
+                    )
+
+    def fit(self, params, corrections):
+        '''
+        Fit the scaler if not None.
+        '''
+        if self.scaler is not None:
+            corrections = self.scaler.fit_transform(corrections)
+
+    @property
+    def transformed_modes(self):
+        '''
+        Compute the transformed modes from the DeepONet and reshape them.
+        '''
+        # build the input for the DeepONet
+        coords = LabelTensor(self.coords,['x', 'y'])
+        modes = LabelTensor(self.modes, [f'mode_{i}' for i in range(self.reduced_dim)])
+        input_deeponet = coords.append(modes) 
+        # compute the transformed modes and reshape them
+        transf_modes = self.deeponet(input_deeponet) 
+        #transf_modes = transf_modes.reshape(
+        #        self.reduced_dim, transf_modes.shape[0]//self.reduced_dim).T
+        return transf_modes
+
+
+    def forward(self, param, coeff_orig):
+        '''
+        Compute the correction term, by multiplying the transformed modes
+        with the learnable coefficients.
+        '''
+        #coeff_corr = self.nn_coeffs(param)
+        transf_modes = self.transformed_modes
+        coeff_corr = self.coeff_net(coeff_orig)
         approx_correction = torch.matmul(transf_modes, coeff_corr.T).T
         if approx_correction.dim() == 1:
             approx_correction = approx_correction.unsqueeze(0)

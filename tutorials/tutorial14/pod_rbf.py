@@ -84,6 +84,19 @@ if __name__ == "__main__":
     # POD model
     rom = PODBlock(reddim)
     rom.fit(snapshots_train)
+    #print(rom.basis.size())
+    red = rom.reduce(snapshots_train)
+    print(f'mean = {torch.mean(red,dim=0)}\nstd = {torch.std(red,dim=0)}')
+
+    fig = plt.figure()
+    ax = fig.add_subplot(projection='3d')
+    scatter = ax.scatter(red[:,0],red[:,1],red[:,2],c=params_train)
+    fig.colorbar(scatter)
+    fig.savefig('img/red_scatter.png')
+
+    exit()
+
+
     predicted_snaps_train = rom.expand(rom.reduce(snapshots_train))
     predicted_snaps_test = rom.expand(rom.reduce(snapshots_test))
 

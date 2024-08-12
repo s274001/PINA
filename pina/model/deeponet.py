@@ -222,7 +222,7 @@ class MIONet(torch.nn.Module):
         aggregated = self._aggregator(torch.dstack(output_))
 
         # reduce
-        output_ = self._reduction(aggregated).reshape(-1, 1)
+        output_ = self._reduction(aggregated)#.reshape(-1, 1)
 
         # scale and translate
         output_ *= self._scale

@@ -8,12 +8,13 @@ from pina.model.layers import PODBlock, RBFLayer
 from pina.model import FeedForward, DeepONet
 from pina.geometry import CartesianDomain
 from pina.problem import AbstractProblem, ParametricProblem
-from pina import Condition, LabelTensor, Trainer
+from pina.callbacks import MetricTracker
+from pina import Condition, LabelTensor, Trainer, Plotter
 from smithers.dataset import NavierStokesDataset
 import matplotlib.pyplot as plt
 from pod_rbf import err, PODRBF
 from scaler import Scaler
-from closure_models import LinearCorrNet, DeepONetCorrNet
+from closure_models import DeepONetCorrNet_Linear, DeepONetCorrNet_NN, LinearCorrNet, DeepONetCorrNet
 from corrected_rom import CorrectedROM
 from sklearn.preprocessing import MinMaxScaler
 import os
@@ -30,7 +31,8 @@ def plot(list_fields, list_labels, filename=None):
         fig.colorbar(a0, ax=ax)
     if filename is not None:
         plt.savefig(filename)
-    plt.show()
+    else:
+        plt.show()
 
 def compute_exact_correction(pod, pod_big, snaps):
     return pod_big.expand(pod_big.reduce(snaps)) - pod.expand(pod.reduce(snaps))
@@ -47,6 +49,8 @@ if __name__ == "__main__":
     field = args.field
     reddim = args.reddim
     bigdim = args.bigdim
+
+    print("doing stuff")
 
     # Import dataset
     data = NavierStokesDataset()
@@ -116,25 +120,39 @@ if __name__ == "__main__":
     ann_corr = LinearCorrNet(pod, scaler=Scaler()) #linear model with least squares, not working
 
     # 2. POD + DeepONet modes@coeffs
-    ann_corr = DeepONetCorrNet(pod,
+    ann_corr = DeepONetCorrNet_NN(pod,
             LabelTensor(data.pts_coordinates.T, ['x', 'y']),
             num_params=400,
-            scaler=Scaler())
+            scaler=Scaler()) #remember to change back to Scaler()
+
+    #in_pts = problem.conditions["correction"].input_points
+    #test = ann_corr(in_pts, ann_corr.coeff_corr)
+    #print(in_pts.shape)
+    #print(test.size())
+
 
     rom = CorrectedROM(problem=problem,
                 reduction_network=pod,
                 interpolation_network=RBFLayer(),
                 correction_network=ann_corr,
-                optimizer=torch.optim.AdamW,
-                optimizer_kwargs={'lr': 3e-3},)
+                optimizer=torch.optim.Adam,
+                optimizer_kwargs={'lr': 3e-3},
+                #scheduler=torch.optim.lr_scheduler.MultiStepLR,
+                #scheduler_kwargs={'gamma': 0.5,'milestones': list(range(1000,10000,1000))}
+                )
 
     # Train the ROM to learn the correction term
     epochs = 10000
 
-    trainer = Trainer(solver=rom, max_epochs=10000, accelerator='cpu',
-            default_root_dir=args.load)
+    #device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    trainer = Trainer(solver=rom, max_epochs=epochs, accelerator='cpu',
+            default_root_dir=args.load, callbacks = [MetricTracker()])
+    #params_train.to(device)
+    #params_test.to(device)
+    #snapshots_train.to(device)
+    #snapshots_test.to(device)
 
-    id_ = 0
+    id_ = 4
     if args.load:
         rom = CorrectedROM.load_from_checkpoint(
                 checkpoint_path=os.path.join(args.load,
@@ -183,4 +201,6 @@ if __name__ == "__main__":
 
     else:
         trainer.train()
-
+        
+        pl = Plotter()
+        pl.plot_loss(trainer=trainer,label='mean_loss',filename='img/loss_linear',logy=True)
