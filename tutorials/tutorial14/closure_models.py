@@ -84,30 +84,24 @@ class DeepONetCorrNet(BaseCorrNet):
     (learnable coefficients)@(transformed_modes), where the transformed modes
     are the actual output of the DeepONet.
     '''
-    def __init__(self, pod, coords, num_params=400, interp=RBFLayer(),
-            scaler=None):
+    def __init__(self, pod, interp=RBFLayer(), scaler=None):
         super().__init__(pod, interp=interp, scaler=scaler)
-        self.coords = coords
         branch_net = FeedForward(
-                input_dimensions=1,
-                output_dimensions=10,
+                input_dimensions=self.reduced_dim + 1,
+                output_dimensions=self.reduced_dim,
                 layers=[20, 20, 20],
                 func=torch.nn.Softplus,
                 )
         trunk_net = FeedForward(
-                input_dimensions=2,
-                output_dimensions=10,
+                input_dimensions=self.reduced_dim,
+                output_dimensions=self.reduced_dim,
                 layers=[20, 20, 20],
                 func=torch.nn.Softplus,
                 )
-#        self.nn_coeffs = FeedForward(
-#                input_dimensions=1,
-#                output_dimensions=self.reduced_dim,
-#                layers=[5, 5, 5, 5],
-#                func=torch.nn.Softplus,
-#                )
-        self.deeponet = DeepONet(branch_net, trunk_net, ['modes'], ['x', 'y'])
-        self.coeff_corr = torch.nn.Parameter(torch.randn(num_params, self.reduced_dim))
+        self.deeponet = DeepONet(branch_net, 
+                                 trunk_net, 
+                                 [f'coef_{i}' for i in range(self.reduced_dim+1)],
+                                 [f'mode_{i}' for i in range(self.reduced_dim)])
 
     def fit(self, params, corrections):
         '''
@@ -119,35 +113,33 @@ class DeepONetCorrNet(BaseCorrNet):
     @property
     def transformed_modes(self):
         '''
-        Compute the transformed modes from the DeepONet and reshape them.
+        Compute the transformed modes from the trunk net.
         '''
-        # build the input for the DeepONet
-        ## repeat the coordinates reduced_dim times as columns
-        coords = LabelTensor(self.coords.repeat(self.reduced_dim, 1),
-                ['x', 'y'])
-        ## the modes here are stored in columns, so concatenate those in a long column
-        modes = torch.vstack([self.modes[:, i] for i in range(self.reduced_dim)])
-        ## append concatenates along the 1st direction. So we have (x,y.mode)
-        input_deeponet = coords.append(LabelTensor(modes, 'modes'))
-        # compute the transformed modes and reshape them
-        transf_modes = (self.deeponet(input_deeponet).reshape(-1,1) +
-                input_deeponet.extract(['modes']))
-        transf_modes = transf_modes.reshape(
-                self.reduced_dim, transf_modes.shape[0]//self.reduced_dim).T
+        transf_modes = self.deeponet.trunk_net(self.modes) 
         return transf_modes
 
+    def transformed_coefficients(self, param, coef):
+        '''
+        Compute the transformed coefficients from the branch net.
+        '''
+        input = torch.cat((param,coef),dim=1)
+        transf_coef = self.deeponet.branch_net(input)
+        return transf_coef
 
-    def forward(self, param, coeff_corr):
+
+    def forward(self, param, coef_orig):
         '''
-        Compute the correction term, by multiplying the transformed modes
-        with the learnable coefficients.
-        '''
-        #coeff_corr = self.nn_coeffs(param)
-        transf_modes = self.transformed_modes
-        approx_correction = torch.matmul(transf_modes, coeff_corr.T).T
-        if approx_correction.dim() == 1:
-            approx_correction = approx_correction.unsqueeze(0)
+        Compute the correction term as the output of the DeepONet.
+        '''        
+        coef = self.transformed_coefficients(param, coef_orig)
+        modes = self.transformed_modes
+
+        approx_correction = torch.matmul(coef,modes.T)
+
+        #approx_correction = self.deeponet(input)
+
         if self.scaler is not None:
             approx_correction = self.scaler.inverse_transform(approx_correction)
+
         return approx_correction
 

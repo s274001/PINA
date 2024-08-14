@@ -14,7 +14,7 @@ from smithers.dataset import NavierStokesDataset
 import matplotlib.pyplot as plt
 from pod_rbf import err, PODRBF
 from scaler import Scaler
-from closure_models import DeepONetCorrNet_Linear, DeepONetCorrNet_NN, LinearCorrNet, DeepONetCorrNet
+from closure_models import  LinearCorrNet, DeepONetCorrNet
 from corrected_rom import CorrectedROM
 from sklearn.preprocessing import MinMaxScaler
 import os
@@ -50,7 +50,6 @@ if __name__ == "__main__":
     reddim = args.reddim
     bigdim = args.bigdim
 
-    print("doing stuff")
 
     # Import dataset
     data = NavierStokesDataset()
@@ -108,8 +107,8 @@ if __name__ == "__main__":
         output_variables = snapshots_train.labels
         #output_variables += exact_correction.labels
         parameter_domain = CartesianDomain({'mu':[0, 100]})
-        conditions = {'data': Condition(input_points=params_train,
-            output_points=snapshots_train),
+        conditions = {#'data': Condition(input_points=params_train,
+            #output_points=snapshots_train),
             'correction': Condition(input_points=params_train,
                 output_points=exact_correction)}
 
@@ -117,13 +116,10 @@ if __name__ == "__main__":
 
     # Strategies for correction term
     # 1. POD + Linear
-    ann_corr = LinearCorrNet(pod, scaler=Scaler()) #linear model with least squares, not working
+    #ann_corr = LinearCorrNet(pod, scaler=Scaler()) #linear model with least squares, not working
 
     # 2. POD + DeepONet modes@coeffs
-    ann_corr = DeepONetCorrNet_NN(pod,
-            LabelTensor(data.pts_coordinates.T, ['x', 'y']),
-            num_params=400,
-            scaler=Scaler()) #remember to change back to Scaler()
+    ann_corr = DeepONetCorrNet(pod, scaler=Scaler())
 
     #in_pts = problem.conditions["correction"].input_points
     #test = ann_corr(in_pts, ann_corr.coeff_corr)
@@ -137,29 +133,36 @@ if __name__ == "__main__":
                 correction_network=ann_corr,
                 optimizer=torch.optim.Adam,
                 optimizer_kwargs={'lr': 3e-3},
-                #scheduler=torch.optim.lr_scheduler.MultiStepLR,
-                #scheduler_kwargs={'gamma': 0.5,'milestones': list(range(1000,10000,1000))}
+                scheduler=torch.optim.lr_scheduler.MultiStepLR,
+                scheduler_kwargs={'gamma': 0.5 ,'milestones': list(range(6000,10000,2000))}
                 )
+    rom.neural_net["reduction_network"].fit(snapshots_train)
+    rom.neural_net["interpolation_network"].fit(params_train,
+                                                rom.neural_net["reduction_network"].reduce(snapshots_train))
 
     # Train the ROM to learn the correction term
     epochs = 10000
 
     #device = 'cuda' if torch.cuda.is_available() else 'cpu'
     trainer = Trainer(solver=rom, max_epochs=epochs, accelerator='cpu',
-            default_root_dir=args.load, callbacks = [MetricTracker()])
+            default_root_dir=args.load, callbacks = [MetricTracker()],
+                      batch_size=100)
     #params_train.to(device)
     #params_test.to(device)
     #snapshots_train.to(device)
     #snapshots_test.to(device)
 
-    id_ = 4
+    id_ = 90
     if args.load:
         rom = CorrectedROM.load_from_checkpoint(
                 checkpoint_path=os.path.join(args.load,
-                f'lightning_logs/version_{id_}/checkpoints/epoch={epochs-1}-step={epochs}.ckpt'),
+                f'lightning_logs/version_{id_}/checkpoints/epoch={epochs-1}-step={epochs*4}.ckpt'),
                 problem=problem, reduction_network=pod,
                 interpolation_network=RBFLayer(),
                 correction_network=ann_corr)
+        rom.neural_net["reduction_network"].fit(snapshots_train)
+        rom.neural_net["interpolation_network"].fit(params_train,
+                                                rom.neural_net["reduction_network"].reduce(snapshots_train))
 
         # Plot the modes with the same function
         modes = rom.neural_net["correction_network"].transformed_modes
@@ -171,7 +174,7 @@ if __name__ == "__main__":
 
         # Evaluate the ROM on train and test
         predicted_snaps_train = rom(params_train)
-        predicted_snaps_test = rom(params_test, test=True)
+        predicted_snaps_test = rom(params_test)
         print(err(snapshots_train, predicted_snaps_train))
         print(err(snapshots_test, predicted_snaps_test))
 
@@ -190,8 +193,8 @@ if __name__ == "__main__":
         plot(list_fields, list_labels, 'img/train_results_10kepochs')
 
         # Plot test correction (approximated and exact)
-        coeff_corrected = rom.test_coeff_corr(params_test)
-        corr = ann_corr(params_test, coeff_corrected
+        coeff_orig = rom.neural_net["interpolation_network"](params_test)
+        corr = ann_corr(params_test,coeff_orig
                 ).detach().numpy()[ind_test, :].reshape(-1)
         exact_corr = compute_exact_correction(
                 pod, pod_big, snapshots_test)[ind_test].detach().numpy().reshape(-1)
