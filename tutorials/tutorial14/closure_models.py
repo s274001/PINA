@@ -4,7 +4,7 @@ from sklearn.model_selection import train_test_split
 import torch
 from pina.solvers import ReducedOrderModelSolver as ROMSolver
 from pina.solvers import SupervisedSolver
-from pina.model.layers import PODBlock, RBFLayer
+from pina.model.layers import PODBlock, RBFLayer, ResidualBlock
 from pina.model import FeedForward, DeepONet
 from pina.geometry import CartesianDomain
 from pina.problem import AbstractProblem, ParametricProblem
@@ -77,6 +77,35 @@ class LinearCorrNet(BaseCorrNet):
         return approx_correction
 
 
+class PrototypeNet(torch.nn.Module):
+    '''
+    Build a neural network with residual connections. This is supposed to be used as branch and trunk for a DeepONet to mitigate possible vanishing gradients.
+    '''
+    def __init__(self, 
+                 input_dim, 
+                 hidden_dim, 
+                 output_dim, 
+                 activation = torch.nn.ReLU(),
+                 ):
+        super().__init__()
+        self.rb1 = ResidualBlock(input_dim=input_dim,
+                                 hidden_dim=hidden_dim,
+                                 output_dim=hidden_dim,
+                                 activation=activation)
+        self.rb2 = ResidualBlock(input_dim=hidden_dim,
+                                 hidden_dim=hidden_dim,
+                                 output_dim=output_dim,
+                                 activation=activation)
+        self.activation = activation
+
+    def forward(self, x):
+        out = self.rb1(x)
+        out = self.activation(out)
+        out = self.rb2(out)
+        
+        return out
+
+
 class DeepONetCorrNet(BaseCorrNet):
     '''
     Build a DeepONet model that transform the POD modes, taking as input the
@@ -84,24 +113,78 @@ class DeepONetCorrNet(BaseCorrNet):
     (learnable coefficients)@(transformed_modes), where the transformed modes
     are the actual output of the DeepONet.
     '''
-    def __init__(self, pod, interp=RBFLayer(), scaler=None):
+    def __init__(self, pod, coords, interp=RBFLayer(), scaler=None):
         super().__init__(pod, interp=interp, scaler=scaler)
-        branch_net = FeedForward(
-                input_dimensions=self.reduced_dim + 1,
-                output_dimensions=self.reduced_dim,
-                layers=[20, 20, 20],
-                func=torch.nn.Softplus,
-                )
-        trunk_net = FeedForward(
-                input_dimensions=self.reduced_dim,
-                output_dimensions=self.reduced_dim,
-                layers=[20, 20, 20],
-                func=torch.nn.Softplus,
-                )
-        self.deeponet = DeepONet(branch_net, 
+
+        self.coords = coords
+        self.modes = LabelTensor(self.modes, [f'mode_{i}' for i in range(self.reduced_dim)])
+
+        # build the mode network
+        out_size = 10
+        #branch_net = FeedForward(
+        #        input_dimensions=self.reduced_dim,
+        #        output_dimensions=out_size,
+        #        layers=[20, 20, 20],
+        #        func=torch.nn.ReLU,
+        #        )
+        #trunk_net = FeedForward(
+        #        input_dimensions=self.coords.shape[1],
+        #        output_dimensions=out_size,
+        #        layers=[20, 20, 20],
+        #        func=torch.nn.ReLU,
+        #        )
+        branch_net = PrototypeNet(input_dim=self.reduced_dim,
+                                  hidden_dim=20,
+                                  output_dim=out_size,
+                                  activation=torch.nn.Softplus()
+                                  )
+        trunk_net = PrototypeNet(input_dim=self.coords.shape[1],
+                                  hidden_dim=20,
+                                  output_dim=out_size,
+                                  activation=torch.nn.Softplus()
+                                  )
+        reduction_layer = torch.nn.Linear(out_size,self.reduced_dim)
+
+        self.mode_net = DeepONet(branch_net, 
                                  trunk_net, 
-                                 [f'coef_{i}' for i in range(self.reduced_dim+1)],
-                                 [f'mode_{i}' for i in range(self.reduced_dim)])
+                                 [f'mode_{i}' for i in range(self.reduced_dim)],
+                                 ['x','y'],
+                                 reduction=reduction_layer
+                                 )
+
+        # build the coefficient network
+        out_size = 5
+        #branch_net = FeedForward(
+        #        input_dimensions=self.reduced_dim,
+        #        output_dimensions=out_size,
+        #        layers=[10, 10, 10],
+        #        func=torch.nn.ReLU,
+        #        )
+        #trunk_net = FeedForward(
+        #        input_dimensions=1,
+        #        output_dimensions=out_size,
+        #        layers=[10, 10, 10],
+        #        func=torch.nn.ReLU,
+        #        )
+        branch_net = PrototypeNet(input_dim=self.reduced_dim,
+                                  hidden_dim=10,
+                                  output_dim=out_size,
+                                  activation=torch.nn.Softplus()
+                                  )
+        trunk_net = PrototypeNet(input_dim=1,
+                                  hidden_dim=10,
+                                  output_dim=out_size,
+                                  activation=torch.nn.Softplus()
+                                  )
+        reduction_layer = torch.nn.Linear(out_size,self.reduced_dim)
+
+        self.coef_net = DeepONet(branch_net,
+                                 trunk_net,
+                                 [f'coef_{i}' for i in range(self.reduced_dim)],
+                                 ['mu'],
+                                 reduction=reduction_layer
+                                 )
+
 
     def fit(self, params, corrections):
         '''
@@ -115,15 +198,17 @@ class DeepONetCorrNet(BaseCorrNet):
         '''
         Compute the transformed modes from the trunk net.
         '''
-        transf_modes = self.deeponet.trunk_net(self.modes) 
+        input = self.coords.append(self.modes)
+        transf_modes = self.mode_net(input) 
         return transf_modes
 
-    def transformed_coefficients(self, param, coef):
+    def transformed_coefficients(self, coef_orig, param):
         '''
         Compute the transformed coefficients from the branch net.
         '''
-        input = torch.cat((param,coef),dim=1)
-        transf_coef = self.deeponet.branch_net(input)
+        coef_orig = LabelTensor(coef_orig, [f'coef_{i}' for i in range(self.reduced_dim)])
+        input = param.append(coef_orig)
+        transf_coef = self.coef_net(input)
         return transf_coef
 
 
@@ -131,7 +216,7 @@ class DeepONetCorrNet(BaseCorrNet):
         '''
         Compute the correction term as the output of the DeepONet.
         '''        
-        coef = self.transformed_coefficients(param, coef_orig)
+        coef = self.transformed_coefficients(coef_orig, param)
         modes = self.transformed_modes
 
         approx_correction = torch.matmul(coef,modes.T)

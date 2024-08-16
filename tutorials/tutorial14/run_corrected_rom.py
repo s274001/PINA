@@ -2,6 +2,7 @@ import numpy as np
 import argparse
 from sklearn.model_selection import train_test_split
 import torch
+from torch.utils.tensorboard import SummaryWriter
 from pina.solvers import ReducedOrderModelSolver as ROMSolver
 from pina.solvers import SupervisedSolver
 from pina.model.layers import PODBlock, RBFLayer
@@ -18,6 +19,7 @@ from closure_models import  LinearCorrNet, DeepONetCorrNet
 from corrected_rom import CorrectedROM
 from sklearn.preprocessing import MinMaxScaler
 import os
+from pytorch_lightning.callbacks import Callback
 
 torch.manual_seed(20)
 
@@ -36,6 +38,23 @@ def plot(list_fields, list_labels, filename=None):
 
 def compute_exact_correction(pod, pod_big, snaps):
     return pod_big.expand(pod_big.reduce(snaps)) - pod.expand(pod.reduce(snaps))
+
+
+class GradTracker(Callback):
+    def __init__(self):
+        super().__init__()
+        self.writer = SummaryWriter()
+
+    def on_after_backward(self, trainer, module):
+        if trainer.current_epoch % 100 == 0 and trainer.is_last_batch:
+            pars = torch.cat([p.grad.detach().ravel() for p in module.parameters()])
+            mean = torch.mean(pars)
+            var = torch.var(pars)
+            self.writer.add_histogram("gradients",pars,trainer.current_epoch)
+            self.writer.add_scalars("statistics",{'mean':mean,'variance':var},trainer.current_epoch)
+            self.writer.add_scalars("metrics",trainer.logged_metrics,trainer.current_epoch)
+        
+
 
 if __name__ == "__main__":
     # Parse arguments
@@ -91,10 +110,11 @@ if __name__ == "__main__":
     #plot(list_fields, list_labels)
 
     # Compact the modes and the coords into a single tensor
-    coords = torch.tensor(coords.repeat(reddim, 1).T)
+    #coords = torch.tensor(coords.repeat(reddim, 1).T)
+    coords = torch.tensor(coords.T,dtype=torch.float32)
     coords = LabelTensor(coords, ['x', 'y'])
-    modes = LabelTensor(modes.reshape(-1, 1), 'modes')
-    input_deeponet = coords.append(modes)
+    #modes = LabelTensor(modes.reshape(-1, 1), 'modes')
+    #input_deeponet = coords.append(modes)
 
     # Compute space-dependent exact correction terms
     exact_correction = compute_exact_correction(pod, pod_big, snapshots_train)
@@ -109,7 +129,7 @@ if __name__ == "__main__":
         parameter_domain = CartesianDomain({'mu':[0, 100]})
         conditions = {#'data': Condition(input_points=params_train,
             #output_points=snapshots_train),
-            'correction': Condition(input_points=params_train,
+                'correction': Condition(input_points=params_train,
                 output_points=exact_correction)}
 
     problem = SnapshotProblem()
@@ -119,7 +139,11 @@ if __name__ == "__main__":
     #ann_corr = LinearCorrNet(pod, scaler=Scaler()) #linear model with least squares, not working
 
     # 2. POD + DeepONet modes@coeffs
-    ann_corr = DeepONetCorrNet(pod, scaler=Scaler())
+    ann_corr = DeepONetCorrNet(pod,
+                               coords=coords,
+                               interp=RBFLayer(),
+                               scaler=Scaler()
+                               )
 
     #in_pts = problem.conditions["correction"].input_points
     #test = ann_corr(in_pts, ann_corr.coeff_corr)
@@ -132,31 +156,31 @@ if __name__ == "__main__":
                 interpolation_network=RBFLayer(),
                 correction_network=ann_corr,
                 optimizer=torch.optim.Adam,
-                optimizer_kwargs={'lr': 3e-3},
+                optimizer_kwargs={'lr': 1e-3},
                 scheduler=torch.optim.lr_scheduler.MultiStepLR,
-                scheduler_kwargs={'gamma': 0.5 ,'milestones': list(range(6000,10000,2000))}
+                scheduler_kwargs={'gamma': 0.1 ,'milestones': [100] }
                 )
     rom.neural_net["reduction_network"].fit(snapshots_train)
     rom.neural_net["interpolation_network"].fit(params_train,
                                                 rom.neural_net["reduction_network"].reduce(snapshots_train))
 
     # Train the ROM to learn the correction term
-    epochs = 10000
+    epochs = 5000
 
     #device = 'cuda' if torch.cuda.is_available() else 'cpu'
     trainer = Trainer(solver=rom, max_epochs=epochs, accelerator='cpu',
             default_root_dir=args.load, callbacks = [MetricTracker()],
-                      batch_size=100)
+                      batch_size=80)
     #params_train.to(device)
     #params_test.to(device)
     #snapshots_train.to(device)
     #snapshots_test.to(device)
 
-    id_ = 90
+    id_ = 123
     if args.load:
         rom = CorrectedROM.load_from_checkpoint(
                 checkpoint_path=os.path.join(args.load,
-                f'lightning_logs/version_{id_}/checkpoints/epoch={epochs-1}-step={epochs*4}.ckpt'),
+                f'lightning_logs/version_{id_}/checkpoints/epoch={epochs-1}-step={epochs*5}.ckpt'),
                 problem=problem, reduction_network=pod,
                 interpolation_network=RBFLayer(),
                 correction_network=ann_corr)
@@ -175,8 +199,8 @@ if __name__ == "__main__":
         # Evaluate the ROM on train and test
         predicted_snaps_train = rom(params_train)
         predicted_snaps_test = rom(params_test)
-        print(err(snapshots_train, predicted_snaps_train))
-        print(err(snapshots_test, predicted_snaps_test))
+        print('Train error = ', err(snapshots_train, predicted_snaps_train))
+        print('Test error = ', err(snapshots_test, predicted_snaps_test))
 
         # Plot the test results (POD-RBF and POD-RBF corrected)
         ind_test = 0

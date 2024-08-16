@@ -74,8 +74,12 @@ class CorrectedROM(SupervisedSolver):
         exact_correction = output_pts
         
         loss_correction = self.loss(approx_correction, exact_correction)
+
+        modes_corr = correction_network.transformed_modes
+        loss_orthog = torch.norm(torch.matmul(modes_corr.T,modes_corr)-torch.eye(correction_network.reduced_dim))
         
-        return loss_correction
+        return loss_correction + loss_orthog
+
 
     @property
     def neural_net(self):
