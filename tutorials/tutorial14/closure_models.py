@@ -166,24 +166,29 @@ class DeepONetCorrNet(BaseCorrNet):
         #        layers=[10, 10, 10],
         #        func=torch.nn.ReLU,
         #        )
-        branch_net = PrototypeNet(input_dim=self.reduced_dim,
-                                  hidden_dim=10,
-                                  output_dim=out_size,
-                                  activation=torch.nn.Softplus()
-                                  )
-        trunk_net = PrototypeNet(input_dim=1,
-                                  hidden_dim=10,
-                                  output_dim=out_size,
-                                  activation=torch.nn.Softplus()
-                                  )
-        reduction_layer = torch.nn.Linear(out_size,self.reduced_dim)
+       # branch_net = PrototypeNet(input_dim=self.reduced_dim,
+       #                           hidden_dim=10,
+       #                           output_dim=out_size,
+       #                           activation=torch.nn.Softplus()
+       #                           )
+       # trunk_net = PrototypeNet(input_dim=1,
+       #                           hidden_dim=10,
+       #                           output_dim=out_size,
+       #                           activation=torch.nn.Softplus()
+       #                           )
+       # reduction_layer = torch.nn.Linear(out_size,self.reduced_dim)
 
-        self.coef_net = DeepONet(branch_net,
-                                 trunk_net,
-                                 [f'coef_{i}' for i in range(self.reduced_dim)],
-                                 ['mu'],
-                                 reduction=reduction_layer
-                                 )
+       # self.coef_net = DeepONet(branch_net,
+       #                          trunk_net,
+       #                          [f'coef_{i}' for i in range(self.reduced_dim)],
+       #                          ['mu'],
+       #                          reduction=reduction_layer
+       #                          )
+        self.coef_net = FeedForward(input_dimensions=self.reduced_dim+1,
+                                    layers=[10, 10, 10],
+                                    output_dimensions=self.reduced_dim,
+                                    func=torch.nn.Softplus
+                                    )
 
 
     def fit(self, params, corrections):

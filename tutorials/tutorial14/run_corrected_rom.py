@@ -52,8 +52,7 @@ class GradTracker(Callback):
             var = torch.var(pars)
             self.writer.add_histogram("gradients",pars,trainer.current_epoch)
             self.writer.add_scalars("statistics",{'mean':mean,'variance':var},trainer.current_epoch)
-            self.writer.add_scalars("metrics",trainer.logged_metrics,trainer.current_epoch)
-        
+            self.writer.add_scalars("metrics",trainer.logged_metrics,trainer.current_epoch) 
 
 
 if __name__ == "__main__":
@@ -157,15 +156,15 @@ if __name__ == "__main__":
                 correction_network=ann_corr,
                 optimizer=torch.optim.Adam,
                 optimizer_kwargs={'lr': 1e-3},
-                scheduler=torch.optim.lr_scheduler.MultiStepLR,
-                scheduler_kwargs={'gamma': 0.1 ,'milestones': [100] }
+                #scheduler=torch.optim.lr_scheduler.MultiStepLR,
+                #scheduler_kwargs={'gamma': 0.1 ,'milestones': [100] }
                 )
     rom.neural_net["reduction_network"].fit(snapshots_train)
     rom.neural_net["interpolation_network"].fit(params_train,
                                                 rom.neural_net["reduction_network"].reduce(snapshots_train))
 
     # Train the ROM to learn the correction term
-    epochs = 5000
+    epochs = 10000
 
     #device = 'cuda' if torch.cuda.is_available() else 'cpu'
     trainer = Trainer(solver=rom, max_epochs=epochs, accelerator='cpu',
@@ -176,7 +175,7 @@ if __name__ == "__main__":
     #snapshots_train.to(device)
     #snapshots_test.to(device)
 
-    id_ = 123
+    id_ = 137
     if args.load:
         rom = CorrectedROM.load_from_checkpoint(
                 checkpoint_path=os.path.join(args.load,
