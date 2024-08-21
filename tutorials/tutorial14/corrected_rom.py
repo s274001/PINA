@@ -40,7 +40,7 @@ class CorrectedROM(SupervisedSolver):
         #    interpolation_network.fit(problem.conditions["data"].input_points,
         #            reduction_network.reduce(problem.conditions["data"].output_points))
         if hasattr(correction_network, "fit"):
-            correction_network.fit(problem.conditions["correction"].input_points,
+            problem.conditions["correction"].output_points = correction_network.fit(problem.conditions["correction"].input_points,
                    problem.conditions["correction"].output_points)
 
         self.modes = reduction_network.basis
@@ -59,6 +59,8 @@ class CorrectedROM(SupervisedSolver):
 
         pod_term = reduction_network.expand(coeff)
         correction_term = correction_network(input_params,coeff)
+        if correction_network.scaler is not None:
+            correction_term = correction_network.scaler.inverse_transform(correction_term)
 
         return pod_term + correction_term
 
@@ -70,15 +72,18 @@ class CorrectedROM(SupervisedSolver):
 
         approx_correction = correction_network(input_pts, coeff_orig)
 
-        #exact_correction = self.problem.conditions["correction"].output_points
         exact_correction = output_pts
         
         loss_correction = self.loss(approx_correction, exact_correction)
 
-        #modes_corr = correction_network.transformed_modes
-        #loss_orthog = torch.norm(torch.matmul(modes_corr.T,modes_corr)-torch.eye(correction_network.reduced_dim))
+        # orthonormalisation loss
+        modes_corr = correction_network.transformed_modes
+        loss_orthog = torch.norm(torch.matmul(modes_corr.T,modes_corr)-torch.eye(correction_network.reduced_dim))
+
+        # importance of correction over orthonormalisation
+        beta = 0.9
         
-        return loss_correction #+ loss_orthog
+        return beta * loss_correction + (1-beta) * loss_orthog
 
 
     @property

@@ -2,7 +2,6 @@ import numpy as np
 import argparse
 from sklearn.model_selection import train_test_split
 import torch
-from torch.utils.tensorboard import SummaryWriter
 from pina.solvers import ReducedOrderModelSolver as ROMSolver
 from pina.solvers import SupervisedSolver
 from pina.model.layers import PODBlock, RBFLayer
@@ -11,7 +10,7 @@ from pina.geometry import CartesianDomain
 from pina.problem import AbstractProblem, ParametricProblem
 from pina.callbacks import MetricTracker
 from pina import Condition, LabelTensor, Trainer, Plotter
-from smithers.dataset import NavierStokesDataset
+from smithers.dataset import NavierStokesDataset, LidCavity
 import matplotlib.pyplot as plt
 from pod_rbf import err, PODRBF
 from scaler import Scaler
@@ -40,21 +39,6 @@ def compute_exact_correction(pod, pod_big, snaps):
     return pod_big.expand(pod_big.reduce(snaps)) - pod.expand(pod.reduce(snaps))
 
 
-class GradTracker(Callback):
-    def __init__(self):
-        super().__init__()
-        self.writer = SummaryWriter()
-
-    def on_after_backward(self, trainer, module):
-        if trainer.current_epoch % 100 == 0 and trainer.is_last_batch:
-            pars = torch.cat([p.grad.detach().ravel() for p in module.parameters()])
-            mean = torch.mean(pars)
-            var = torch.var(pars)
-            self.writer.add_histogram("gradients",pars,trainer.current_epoch)
-            self.writer.add_scalars("statistics",{'mean':mean,'variance':var},trainer.current_epoch)
-            self.writer.add_scalars("metrics",trainer.logged_metrics,trainer.current_epoch) 
-
-
 if __name__ == "__main__":
     # Parse arguments
     parser = argparse.ArgumentParser(description='Reduced Order Model Example')
@@ -71,6 +55,7 @@ if __name__ == "__main__":
 
     # Import dataset
     data = NavierStokesDataset()
+    #data = LidCavity()
     snapshots = data.snapshots[field]
     coords = data.pts_coordinates
     params = data.params
@@ -81,7 +66,7 @@ if __name__ == "__main__":
 
     # Divide dataset into training and testing
     params_train, params_test, snapshots_train, snapshots_test = train_test_split(
-            params, snapshots, test_size=0.2, shuffle=False, random_state=42)
+            params, snapshots, test_size=0.2, shuffle=True, random_state=42)
 
     # From numpy to LabelTensor
     params_train = LabelTensor(torch.tensor(params_train, dtype=torch.float32),
@@ -102,18 +87,15 @@ if __name__ == "__main__":
     pod_big.fit(snapshots_train)
 
     # Plot the modes
-    modes = pod.basis.T
-    list_fields = [modes.detach().numpy()[:, i].reshape(-1)
-            for i in range(modes.shape[1])]
-    list_labels = [f'Mode {i}' for i in range(modes.shape[1])]
+    #modes = pod.basis.T
+    #list_fields = [modes.detach().numpy()[:, i].reshape(-1)
+    #        for i in range(modes.shape[1])]
+    #list_labels = [f'Mode {i}' for i in range(modes.shape[1])]
     #plot(list_fields, list_labels)
 
-    # Compact the modes and the coords into a single tensor
-    #coords = torch.tensor(coords.repeat(reddim, 1).T)
+    # Coordinates as LabelTensor
     coords = torch.tensor(coords.T,dtype=torch.float32)
     coords = LabelTensor(coords, ['x', 'y'])
-    #modes = LabelTensor(modes.reshape(-1, 1), 'modes')
-    #input_deeponet = coords.append(modes)
 
     # Compute space-dependent exact correction terms
     exact_correction = compute_exact_correction(pod, pod_big, snapshots_train)
@@ -132,6 +114,8 @@ if __name__ == "__main__":
                 output_points=exact_correction)}
 
     problem = SnapshotProblem()
+    #print(torch.min(problem.conditions["correction"].output_points))
+    #print(torch.max(problem.conditions["correction"].output_points))
 
     # Strategies for correction term
     # 1. POD + Linear
@@ -144,48 +128,23 @@ if __name__ == "__main__":
                                scaler=Scaler()
                                )
 
-    #in_pts = problem.conditions["correction"].input_points
-    #test = ann_corr(in_pts, ann_corr.coeff_corr)
-    #print(in_pts.shape)
-    #print(test.size())
-
-
-    rom = CorrectedROM(problem=problem,
-                reduction_network=pod,
-                interpolation_network=RBFLayer(),
-                correction_network=ann_corr,
-                optimizer=torch.optim.Adam,
-                optimizer_kwargs={'lr': 1e-3},
-                #scheduler=torch.optim.lr_scheduler.MultiStepLR,
-                #scheduler_kwargs={'gamma': 0.1 ,'milestones': [100] }
-                )
-    rom.neural_net["reduction_network"].fit(snapshots_train)
-    rom.neural_net["interpolation_network"].fit(params_train,
-                                                rom.neural_net["reduction_network"].reduce(snapshots_train))
-
-    # Train the ROM to learn the correction term
-    epochs = 10000
-
-    #device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    trainer = Trainer(solver=rom, max_epochs=epochs, accelerator='cpu',
-            default_root_dir=args.load, callbacks = [MetricTracker()],
-                      batch_size=80)
-    #params_train.to(device)
-    #params_test.to(device)
-    #snapshots_train.to(device)
-    #snapshots_test.to(device)
-
-    id_ = 137
     if args.load:
+        id_ = 151
+        epochs = 10000
+        num_batches = 5
+
         rom = CorrectedROM.load_from_checkpoint(
                 checkpoint_path=os.path.join(args.load,
-                f'lightning_logs/version_{id_}/checkpoints/epoch={epochs-1}-step={epochs*5}.ckpt'),
+                f'lightning_logs/version_{id_}/checkpoints/epoch={epochs-1}-step={epochs*num_batches}.ckpt'),
                 problem=problem, reduction_network=pod,
                 interpolation_network=RBFLayer(),
                 correction_network=ann_corr)
+        # fit the pod and RBF on train data
         rom.neural_net["reduction_network"].fit(snapshots_train)
         rom.neural_net["interpolation_network"].fit(params_train,
                                                 rom.neural_net["reduction_network"].reduce(snapshots_train))
+        #print(torch.min(rom.problem.conditions["correction"].output_points))
+        #print(torch.max(rom.problem.conditions["correction"].output_points))
 
         # Plot the modes with the same function
         modes = rom.neural_net["correction_network"].transformed_modes
@@ -217,8 +176,12 @@ if __name__ == "__main__":
 
         # Plot test correction (approximated and exact)
         coeff_orig = rom.neural_net["interpolation_network"](params_test)
-        corr = ann_corr(params_test,coeff_orig
-                ).detach().numpy()[ind_test, :].reshape(-1)
+        corr_scaler = rom.neural_net["correction_network"].scaler
+        # scale the predicted correction back to original scale
+        corr = ann_corr(params_test,coeff_orig)
+        if corr_scaler is not None:
+            corr = corr_scaler.inverse_transform(corr)
+        corr = corr.detach().numpy()[ind_test, :].reshape(-1)
         exact_corr = compute_exact_correction(
                 pod, pod_big, snapshots_test)[ind_test].detach().numpy().reshape(-1)
         list_fields = [corr, exact_corr, corr - exact_corr]
@@ -226,7 +189,27 @@ if __name__ == "__main__":
         plot(list_fields, list_labels, 'img/correction_test_10kepochs')
 
     else:
+        rom = CorrectedROM(problem=problem,
+                    reduction_network=pod,
+                    interpolation_network=RBFLayer(),
+                    correction_network=ann_corr,
+                    optimizer=torch.optim.Adam,
+                    optimizer_kwargs={'lr': 1e-3},
+                    #scheduler=torch.optim.lr_scheduler.MultiStepLR,
+                    #scheduler_kwargs={'gamma': 0.5 ,'milestones': [250, 500, 750, 1000, 1250, 1500, 1750] }
+                    )
+        # Fit the pod and RBF on train data
+        rom.neural_net["reduction_network"].fit(snapshots_train)
+        rom.neural_net["interpolation_network"].fit(params_train,
+                                                    rom.neural_net["reduction_network"].reduce(snapshots_train))
+
+        # Train the ROM to learn the correction term
+        epochs = 10000
+
+        trainer = Trainer(solver=rom, max_epochs=epochs, accelerator='cpu',
+                default_root_dir=args.load, callbacks = [MetricTracker()],
+                          batch_size=80)
         trainer.train()
         
         pl = Plotter()
-        pl.plot_loss(trainer=trainer,label='mean_loss',filename='img/loss_linear',logy=True)
+        pl.plot_loss(trainer=trainer,label='mean_loss',filename='img/loss',logy=True)

@@ -79,7 +79,12 @@ class LinearCorrNet(BaseCorrNet):
 
 class PrototypeNet(torch.nn.Module):
     '''
-    Build a neural network with residual connections. This is supposed to be used as branch and trunk for a DeepONet to mitigate possible vanishing gradients.
+    Build a neural network with residual connections. Concatenates two residual blocks and results in a network with three hidden layers.
+
+    :param input_dim: the dimension of the input layer
+    :param hidden_dim: dimension of the hidden layers
+    :param output_dim: dimension of the output layer
+    :param activation: activation function
     '''
     def __init__(self, 
                  input_dim, 
@@ -108,10 +113,7 @@ class PrototypeNet(torch.nn.Module):
 
 class DeepONetCorrNet(BaseCorrNet):
     '''
-    Build a DeepONet model that transform the POD modes, taking as input the
-    POD modes and the x coordinates, and output the exact correction, built as
-    (learnable coefficients)@(transformed_modes), where the transformed modes
-    are the actual output of the DeepONet.
+    Build a DeepONet model that transform the POD modes and coefficients. Has two DeepONets: one takes as input the parameter and coefficients, the other takes as input the coordinates and modes.
     '''
     def __init__(self, pod, coords, interp=RBFLayer(), scaler=None):
         super().__init__(pod, interp=interp, scaler=scaler)
@@ -121,18 +123,6 @@ class DeepONetCorrNet(BaseCorrNet):
 
         # build the mode network
         out_size = 10
-        #branch_net = FeedForward(
-        #        input_dimensions=self.reduced_dim,
-        #        output_dimensions=out_size,
-        #        layers=[20, 20, 20],
-        #        func=torch.nn.ReLU,
-        #        )
-        #trunk_net = FeedForward(
-        #        input_dimensions=self.coords.shape[1],
-        #        output_dimensions=out_size,
-        #        layers=[20, 20, 20],
-        #        func=torch.nn.ReLU,
-        #        )
         branch_net = PrototypeNet(input_dim=self.reduced_dim,
                                   hidden_dim=20,
                                   output_dim=out_size,
@@ -154,42 +144,24 @@ class DeepONetCorrNet(BaseCorrNet):
 
         # build the coefficient network
         out_size = 5
-        #branch_net = FeedForward(
-        #        input_dimensions=self.reduced_dim,
-        #        output_dimensions=out_size,
-        #        layers=[10, 10, 10],
-        #        func=torch.nn.ReLU,
-        #        )
-        #trunk_net = FeedForward(
-        #        input_dimensions=1,
-        #        output_dimensions=out_size,
-        #        layers=[10, 10, 10],
-        #        func=torch.nn.ReLU,
-        #        )
-       # branch_net = PrototypeNet(input_dim=self.reduced_dim,
-       #                           hidden_dim=10,
-       #                           output_dim=out_size,
-       #                           activation=torch.nn.Softplus()
-       #                           )
-       # trunk_net = PrototypeNet(input_dim=1,
-       #                           hidden_dim=10,
-       #                           output_dim=out_size,
-       #                           activation=torch.nn.Softplus()
-       #                           )
-       # reduction_layer = torch.nn.Linear(out_size,self.reduced_dim)
+        branch_net = PrototypeNet(input_dim=self.reduced_dim,
+                                  hidden_dim=10,
+                                  output_dim=out_size,
+                                  activation=torch.nn.Softplus()
+                                  )
+        trunk_net = PrototypeNet(input_dim=1,
+                                  hidden_dim=10,
+                                  output_dim=out_size,
+                                  activation=torch.nn.Softplus()
+                                  )
+        reduction_layer = torch.nn.Linear(out_size,self.reduced_dim)
 
-       # self.coef_net = DeepONet(branch_net,
-       #                          trunk_net,
-       #                          [f'coef_{i}' for i in range(self.reduced_dim)],
-       #                          ['mu'],
-       #                          reduction=reduction_layer
-       #                          )
-        self.coef_net = FeedForward(input_dimensions=self.reduced_dim+1,
-                                    layers=[10, 10, 10],
-                                    output_dimensions=self.reduced_dim,
-                                    func=torch.nn.Softplus
-                                    )
-
+        self.coef_net = DeepONet(branch_net,
+                                 trunk_net,
+                                 [f'coef_{i}' for i in range(self.reduced_dim)],
+                                 ['mu'],
+                                 reduction=reduction_layer
+                                 )
 
     def fit(self, params, corrections):
         '''
@@ -197,11 +169,12 @@ class DeepONetCorrNet(BaseCorrNet):
         '''
         if self.scaler is not None:
             corrections = self.scaler.fit_transform(corrections)
+        return corrections
 
     @property
     def transformed_modes(self):
         '''
-        Compute the transformed modes from the trunk net.
+        Compute the transformed modes.
         '''
         input = self.coords.append(self.modes)
         transf_modes = self.mode_net(input) 
@@ -209,7 +182,7 @@ class DeepONetCorrNet(BaseCorrNet):
 
     def transformed_coefficients(self, coef_orig, param):
         '''
-        Compute the transformed coefficients from the branch net.
+        Compute the transformed coefficients.
         '''
         coef_orig = LabelTensor(coef_orig, [f'coef_{i}' for i in range(self.reduced_dim)])
         input = param.append(coef_orig)
@@ -219,17 +192,17 @@ class DeepONetCorrNet(BaseCorrNet):
 
     def forward(self, param, coef_orig):
         '''
-        Compute the correction term as the output of the DeepONet.
+        Compute the correction term.
+        :param param: parameter
+        :param coef_original: the coefficients in the original POD expansion
         '''        
         coef = self.transformed_coefficients(coef_orig, param)
         modes = self.transformed_modes
 
         approx_correction = torch.matmul(coef,modes.T)
 
-        #approx_correction = self.deeponet(input)
-
-        if self.scaler is not None:
-            approx_correction = self.scaler.inverse_transform(approx_correction)
+        #if self.scaler is not None:
+        #    approx_correction = self.scaler.inverse_transform(approx_correction)
 
         return approx_correction
 

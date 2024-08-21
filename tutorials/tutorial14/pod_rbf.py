@@ -9,7 +9,7 @@ from pina.geometry import CartesianDomain
 from pina.problem import AbstractProblem, ParametricProblem
 from pina import Condition, LabelTensor
 from pina.callbacks import MetricTracker
-from smithers.dataset import NavierStokesDataset
+from smithers.dataset import NavierStokesDataset, LidCavity
 import matplotlib.pyplot as plt
 
 torch.manual_seed(20)
@@ -91,10 +91,10 @@ if __name__ == "__main__":
     fig = plt.figure()
     ax = fig.add_subplot(projection='3d')
     scatter = ax.scatter(red[:,0],red[:,1],red[:,2],c=params_train)
+    ax.set_title("POD coefficients")
     fig.colorbar(scatter)
-    fig.savefig('img/red_scatter.png')
+    #fig.savefig('img/red_scatter.png')
 
-    exit()
 
 
     predicted_snaps_train = rom.expand(rom.reduce(snapshots_train))
