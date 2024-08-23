@@ -23,17 +23,30 @@ from pytorch_lightning.callbacks import Callback
 torch.manual_seed(20)
 
 def plot(list_fields, list_labels, filename=None):
-    fig, axs = plt.subplots(1, len(list_fields),
-            figsize=(5*len(list_fields), 3))
-    for field, label, ax in zip(list_fields, list_labels, axs):
-        a0 = ax.tricontourf(data.triang, field,
-                levels=16, cmap='viridis')
-        ax.set_title(label)
-        fig.colorbar(a0, ax=ax)
-    if filename is not None:
-        plt.savefig(filename)
+    if len(list_fields) > 1:
+        fig, axs = plt.subplots(1, len(list_fields),
+                figsize=(5*len(list_fields), 3))
+        for field, label, ax in zip(list_fields, list_labels, axs):
+            a0 = ax.tricontourf(data.triang, field,
+                    levels=16, cmap='viridis')
+            ax.set_title(label)
+            fig.colorbar(a0, ax=ax)
+        if filename is not None:
+            plt.savefig(filename)
+        else:
+            plt.show()
     else:
-        plt.show()
+        fig, ax = plt.subplots(1, 1,
+                figsize=(5, 3))
+        a0 = ax.tricontourf(data.triang, list_fields[0],
+                    levels=16, cmap='viridis')
+        ax.set_title(list_labels[0])
+        fig.colorbar(a0, ax=ax)
+        if filename is not None:
+            plt.savefig(filename)
+        else:
+            plt.show()
+
 
 def compute_exact_correction(pod, pod_big, snaps):
     return pod_big.expand(pod_big.reduce(snaps)) - pod.expand(pod.reduce(snaps))
@@ -54,10 +67,10 @@ if __name__ == "__main__":
 
 
     # Import dataset
-    data = NavierStokesDataset()
-    #data = LidCavity()
+    #data = NavierStokesDataset()
+    data = LidCavity()
     snapshots = data.snapshots[field]
-    coords = data.pts_coordinates
+    coords = data.coordinates
     params = data.params
     scaler_params = MinMaxScaler()
     params = scaler_params.fit_transform(params)
@@ -94,7 +107,7 @@ if __name__ == "__main__":
     #plot(list_fields, list_labels)
 
     # Coordinates as LabelTensor
-    coords = torch.tensor(coords.T,dtype=torch.float32)
+    coords = torch.tensor(coords,dtype=torch.float32)
     coords = LabelTensor(coords, ['x', 'y'])
 
     # Compute space-dependent exact correction terms
@@ -129,9 +142,9 @@ if __name__ == "__main__":
                                )
 
     if args.load:
-        id_ = 151
+        id_ = 167
         epochs = 10000
-        num_batches = 5
+        num_batches = 4
 
         rom = CorrectedROM.load_from_checkpoint(
                 checkpoint_path=os.path.join(args.load,
@@ -194,7 +207,7 @@ if __name__ == "__main__":
                     interpolation_network=RBFLayer(),
                     correction_network=ann_corr,
                     optimizer=torch.optim.Adam,
-                    optimizer_kwargs={'lr': 1e-3},
+                    optimizer_kwargs={'lr': 1e-5},
                     #scheduler=torch.optim.lr_scheduler.MultiStepLR,
                     #scheduler_kwargs={'gamma': 0.5 ,'milestones': [250, 500, 750, 1000, 1250, 1500, 1750] }
                     )
@@ -208,7 +221,7 @@ if __name__ == "__main__":
 
         trainer = Trainer(solver=rom, max_epochs=epochs, accelerator='cpu',
                 default_root_dir=args.load, callbacks = [MetricTracker()],
-                          batch_size=80)
+                          batch_size=60)
         trainer.train()
         
         pl = Plotter()

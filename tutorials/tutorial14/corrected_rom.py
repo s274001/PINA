@@ -81,7 +81,9 @@ class CorrectedROM(SupervisedSolver):
         loss_orthog = torch.norm(torch.matmul(modes_corr.T,modes_corr)-torch.eye(correction_network.reduced_dim))
 
         # importance of correction over orthonormalisation
-        beta = 0.9
+        beta = 1
+        self.log("loss_orthon", float(loss_orthog), prog_bar=True, logger=True)
+        self.log("loss_corr", float(loss_correction), prog_bar=True, logger=True)
         
         return beta * loss_correction + (1-beta) * loss_orthog
 
