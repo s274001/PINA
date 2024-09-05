@@ -3,7 +3,7 @@ import argparse
 from sklearn.model_selection import train_test_split
 import torch
 from pina.solvers import ReducedOrderModelSolver as ROMSolver
-from pina.model.layers import PODBlock, RBFLayer
+from pina.model.layers import PODBlock, RBFBlock
 from pina.model import FeedForward
 from pina.geometry import CartesianDomain
 from pina.problem import AbstractProblem, ParametricProblem
@@ -27,7 +27,7 @@ class PODRBF(torch.nn.Module):
     def __init__(self, pod_rank, rbf_kernel):
         super().__init__()
         self.pod = PODBlock(pod_rank)
-        self.rbf = RBFLayer(kernel=rbf_kernel)
+        self.rbf = RBFBlock(kernel=rbf_kernel)
 
     def fit(self, params, snaps):
         self.pod.fit(snaps)
@@ -50,7 +50,8 @@ if __name__ == "__main__":
     reddim = args.reddim
 
     # Import dataset
-    data = NavierStokesDataset()
+    #data = NavierStokesDataset()
+    data = LidCavity()
     snapshots = data.snapshots[field]
     params = data.params
     Ndof = snapshots.shape[1]
@@ -58,7 +59,7 @@ if __name__ == "__main__":
 
     # Divide dataset into training and testing
     params_train, params_test, snapshots_train, snapshots_test = train_test_split(
-            params, snapshots, test_size=0.2, shuffle=False, random_state=42)
+            params, snapshots, test_size=0.2, shuffle=True, random_state=42)
 
     # From numpy to LabelTensor
     params_train = LabelTensor(torch.tensor(params_train, dtype=torch.float32),
@@ -79,20 +80,20 @@ if __name__ == "__main__":
             output_points=snapshots_train)}
 
     problem = SnapshotProblem()
-    print(snapshots_train.shape, snapshots_test.shape)
+    #print(snapshots_train.shape, snapshots_test.shape)
 
     # POD model
     rom = PODBlock(reddim)
     rom.fit(snapshots_train)
     #print(rom.basis.size())
     red = rom.reduce(snapshots_train)
-    print(f'mean = {torch.mean(red,dim=0)}\nstd = {torch.std(red,dim=0)}')
+    #print(f'mean = {torch.mean(red,dim=0)}\nstd = {torch.std(red,dim=0)}')
 
-    fig = plt.figure()
-    ax = fig.add_subplot(projection='3d')
-    scatter = ax.scatter(red[:,0],red[:,1],red[:,2],c=params_train)
-    ax.set_title("POD coefficients")
-    fig.colorbar(scatter)
+    #fig = plt.figure()
+    #ax = fig.add_subplot(projection='3d')
+    #scatter = ax.scatter(red[:,0],red[:,1],red[:,2],c=params_train)
+    #ax.set_title("POD coefficients")
+    #fig.colorbar(scatter)
     #fig.savefig('img/red_scatter.png')
 
 
@@ -120,7 +121,7 @@ if __name__ == "__main__":
 
     # Plot the results
     fig, axs = plt.subplots(1, 3, figsize=(15, 3))
-    ind_test = 2
+    ind_test = 0
     snap = snapshots_train[ind_test].detach().numpy().reshape(-1)
     pred_snap = predicted_snaps_train[ind_test].detach().numpy().reshape(-1)
     a0 = axs[0].tricontourf(data.triang, snap, levels=16,

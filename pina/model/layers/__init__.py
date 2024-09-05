@@ -15,6 +15,7 @@ __all__ = [
     "AVNOBlock",
     "LowRankBlock",
     "RBFBlock",
+    "OrthogonalBlock",
 ]
 
 from .convolution_2d import ContinuousConvBlock
@@ -31,3 +32,4 @@ from .embedding import PeriodicBoundaryEmbedding, FourierFeatureEmbedding
 from .avno_layer import AVNOBlock
 from .lowrank_layer import LowRankBlock
 from .rbf_layer import RBFBlock
+from .orthogonal import OrthogonalBlock

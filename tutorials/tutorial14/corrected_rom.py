@@ -77,15 +77,16 @@ class CorrectedROM(SupervisedSolver):
         loss_correction = self.loss(approx_correction, exact_correction)
 
         # orthonormalisation loss
-        modes_corr = correction_network.transformed_modes
-        loss_orthog = torch.norm(torch.matmul(modes_corr.T,modes_corr)-torch.eye(correction_network.reduced_dim))
+        #modes_corr = correction_network.transformed_modes()
+        #loss_orthog = torch.norm(torch.matmul(modes_corr.T,modes_corr)-torch.eye(correction_network.reduced_dim))
 
         # importance of correction over orthonormalisation
-        beta = 1
-        self.log("loss_orthon", float(loss_orthog), prog_bar=True, logger=True)
-        self.log("loss_corr", float(loss_correction), prog_bar=True, logger=True)
+        #beta = 1
+        #self.log("loss_orthon", float(loss_orthog), prog_bar=True, logger=True)
+        #self.log("loss_corr", float(loss_correction), prog_bar=True, logger=True)
         
-        return beta * loss_correction + (1-beta) * loss_orthog
+        #return beta * loss_correction #+ (1-beta) * loss_orthog
+        return  loss_correction #+ (1-beta) * loss_orthog
 
 
     @property
