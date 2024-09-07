@@ -40,7 +40,8 @@ class CorrectedROM(SupervisedSolver):
         #    interpolation_network.fit(problem.conditions["data"].input_points,
         #            reduction_network.reduce(problem.conditions["data"].output_points))
         if hasattr(correction_network, "fit"):
-            problem.conditions["correction"].output_points = correction_network.fit(problem.conditions["correction"].input_points,
+            #problem.conditions["correction"].output_points = 
+            correction_network.fit(problem.conditions["correction"].input_points,
                    problem.conditions["correction"].output_points)
 
         self.modes = reduction_network.basis
