@@ -28,6 +28,7 @@ class PODBlock(torch.nn.Module):
         super().__init__()
         self.__scale_coefficients = scale_coefficients
         self._basis = None
+        self._values = None
         self._scaler = None
         self._rank = rank
 
@@ -58,6 +59,10 @@ class PODBlock(torch.nn.Module):
             return None
 
         return self._basis[: self.rank]
+
+    @property
+    def values(self):
+        return self._values
 
     @property
     def scaler(self):
@@ -121,7 +126,8 @@ class PODBlock(torch.nn.Module):
         if X.device.type == "mps":  #  svd_lowrank not arailable for mps
             self._basis = torch.svd(X.T)[0].T
         else:
-            self._basis = torch.svd_lowrank(X.T, q=X.shape[0])[0].T
+            self._basis, self._values, _ = torch.svd_lowrank(X.T, q=X.shape[0])#[0].T
+            self._basis = self._basis.T
 
     def forward(self, X):
         """

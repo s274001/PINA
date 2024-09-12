@@ -24,6 +24,7 @@ from pytorch_lightning.callbacks import Callback
 
 torch.manual_seed(20)
 
+
 if __name__ == "__main__":
     # Parse arguments
     parser = argparse.ArgumentParser(description='Reduced Order Model Example')
@@ -31,11 +32,14 @@ if __name__ == "__main__":
     parser.add_argument('--bigdim', type=int, default=15, help='Bigger dimension')
     parser.add_argument('--field', type=str, default='mag(v)', help='Field to reduce')
     parser.add_argument('--load', help='Directory to save or load file', type=str)
+    parser.add_argument('--outsize', help='Size of DeepONet output', type=int)
+    parser.add_argument('--version', help='Version of the model you wish to load', type=int)
 
     args = parser.parse_args()
     field = args.field
     reddim = args.reddim
     bigdim = args.bigdim
+    outsize = args.outsize
 
 
     # Import dataset
@@ -71,11 +75,12 @@ if __name__ == "__main__":
     pod_big.fit(snapshots_train)
 
     # Plot the modes
-    #modes = pod.basis.T
-    #list_fields = [modes.detach().numpy()[:, i].reshape(-1)
-    #        for i in range(modes.shape[1])]
-    #list_labels = [f'Mode {i}' for i in range(modes.shape[1])]
-    #plot(list_fields, list_labels)
+    modes = pod_big.basis.T
+    list_fields = [modes.detach().numpy()[:, i].reshape(-1)
+            for i in range(2*reddim)]
+    list_labels = [f'Mode {i}' for i in range(2*reddim)]
+    plot(data.triang,list_fields, list_labels,'img/modes_pod')
+
 
     # Coordinates as LabelTensor
     coords = torch.tensor(coords,dtype=torch.float32)
@@ -112,17 +117,19 @@ if __name__ == "__main__":
     ann_corr = DeepONetCorrNet(pod,
                                coords=coords,
                                interp=RBFBlock(),
-                               scaler=Scaler(axis=1)
+                               scaler=None,
+                               mode_output_size=outsize
                                )
 
     if args.load:
-        id_ = 223
-        epochs = 1099
+        id_ = args.version
+        epochs = 5000
         num_batches = 4
+        folder = f'img{id_}'
 
         rom = CorrectedROM.load_from_checkpoint(
                 checkpoint_path=os.path.join(args.load,
-                f'lightning_logs/version_{id_}/checkpoints/epoch={epochs-1}-step={4396}.ckpt'),
+                f'lightning_logs/version_{id_}/checkpoints/epoch={epochs-1}-step={epochs*num_batches}.ckpt'),
                 problem=problem, reduction_network=pod,
                 interpolation_network=RBFBlock(),
                 correction_network=ann_corr)
@@ -140,7 +147,7 @@ if __name__ == "__main__":
         modes = modes.detach().numpy()
         list_fields = [modes[:, i] for i in range(modes.shape[1])]
         list_labels = [f'Mode {i}' for i in range(modes.shape[1])]
-        plot(data.triang,list_fields, list_labels, 'img/transformed_modes_10kepochs')
+        plot(data.triang,list_fields, list_labels, folder+f'/transformed_modes_{epochs}epochs')
 
 
         # Evaluate the ROM on train and test
@@ -148,8 +155,8 @@ if __name__ == "__main__":
         exact_corr = compute_exact_correction(pod, pod_big, snapshots_test)
         exact_corr = LabelTensor(exact_corr,
             [f's{i}' for i in range(Ndof)])
-        rom.neural_net["correction_network"].scaler = Scaler(axis=1)
-        rom.neural_net["correction_network"].scaler.fit(exact_corr) 
+        #rom.neural_net["correction_network"].scaler = Scaler(axis=1)
+        #rom.neural_net["correction_network"].scaler.fit(exact_corr) 
         predicted_snaps_test = rom(params_test)
         print('Train error = ', err(snapshots_train, predicted_snaps_train))
         print('Test error = ', err(snapshots_test, predicted_snaps_test))
@@ -166,7 +173,7 @@ if __name__ == "__main__":
                 snap - pred_snap, snap-pred_pod_rbf]
         list_labels = ['Truth', 'Corrected POD-RBF', 'POD',
                 'Error Corrected', 'Error POD']
-        plot(data.triang,list_fields, list_labels, 'img/train_results_10kepochs')
+        plot(data.triang,list_fields, list_labels, folder+f'/train_results_{epochs}epochs')
 
         # Plot test correction (approximated and exact)
         coeff_orig = rom.neural_net["interpolation_network"](params_test)
@@ -182,15 +189,15 @@ if __name__ == "__main__":
         exact_corr = exact_corr[ind_test].detach().numpy().reshape(-1)
         list_fields = [corr, exact_corr, corr - exact_corr]
         list_labels = ['Approximated Correction', 'Exact Correction', 'Error']
-        plot(data.triang,list_fields, list_labels, 'img/correction_test_10kepochs')
+        plot(data.triang,list_fields, list_labels, folder+f'/correction_test_{epochs}epochs')
 
     else:
         rom = CorrectedROM(problem=problem,
                     reduction_network=pod,
                     interpolation_network=RBFBlock(),
                     correction_network=ann_corr,
-                    optimizer=torch.optim.Adam,
-                    optimizer_kwargs={'lr': 1e-3},
+                    optimizer=torch.optim.AdamW,
+                    optimizer_kwargs={'lr': 7e-3},
                     #scheduler=torch.optim.lr_scheduler.MultiStepLR,
                     #scheduler_kwargs={'gamma': 0.5 ,'milestones': [250, 500, 750, 1000, 1250, 1500, 1750] }
                     )
@@ -200,7 +207,7 @@ if __name__ == "__main__":
                                                     rom.neural_net["reduction_network"].reduce(snapshots_train))
 
         # Train the ROM to learn the correction term
-        epochs = 10000
+        epochs = 5000
 
         trainer = Trainer(solver=rom, max_epochs=epochs, accelerator='cpu',
                 default_root_dir=args.load, callbacks = [MetricTracker()],

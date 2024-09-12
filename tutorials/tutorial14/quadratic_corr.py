@@ -33,8 +33,12 @@ class QuadraticCorrNet(BaseCorrNet):
         '''
         R_mat = corrections
         D_mat = self.D_matrix(self.coeffs)
+        if torch.linalg.cond(D_mat) >= 1e5:
+            driver = 'gelsd'
+        else:
+            driver = 'gelsy'
         tic = time.time()
-        self.operator = torch.linalg.lstsq(D_mat, R_mat).solution
+        self.operator = torch.linalg.lstsq(D_mat, R_mat,driver=driver).solution
         toc = time.time()
         print("Time for least squares: ", toc-tic)
 

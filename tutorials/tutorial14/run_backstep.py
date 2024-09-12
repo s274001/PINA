@@ -21,6 +21,16 @@ from utils import plot, compute_exact_correction
 from sklearn.preprocessing import MinMaxScaler
 import os
 from pytorch_lightning.callbacks import Callback
+import logging
+import time
+
+logging.basicConfig(filename='deep_log.txt',level=logging.INFO,format='%(message)s')
+class LogCallback(Callback):
+    def on_train_start(self, trainer, pl_module):
+        self.tstart = time.time()
+    def on_train_end(self,trainer,pl_module):
+        self.tend = time.time()
+        logging.info(f'reddim={pl_module.neural_net["reduction_network"].rank}, v_num={pl_module.logger.version}, mean_loss={trainer.callback_metrics['mean_loss'].item()}, train_time={self.tend-self.tstart}')
 
 torch.manual_seed(20)
 
@@ -31,6 +41,7 @@ if __name__ == "__main__":
     parser.add_argument('--bigdim', type=int, default=15, help='Bigger dimension')
     parser.add_argument('--field', type=str, default='mag(v)', help='Field to reduce')
     parser.add_argument('--load', help='Directory to save or load file', type=str)
+    parser.add_argument('--version', help='Model version', type=int)
 
     args = parser.parse_args()
     field = args.field
@@ -67,22 +78,23 @@ if __name__ == "__main__":
     pod.fit(snapshots_train)
     modes = pod.basis
 
-    pod_big = PODBlock(bigdim)
-    pod_big.fit(snapshots_train)
+    rbf = RBFBlock(kernel='linear')
+    rbf.fit(params_train, pod.reduce(snapshots_train))
 
     # Plot the modes
-    #modes = pod.basis.T
+    #modes = pod_big.basis.T
     #list_fields = [modes.detach().numpy()[:, i].reshape(-1)
-    #        for i in range(modes.shape[1])]
-    #list_labels = [f'Mode {i}' for i in range(modes.shape[1])]
-    #plot(list_fields, list_labels)
+    #        for i in range(2*reddim)]
+    #list_labels = [f'Mode {i}' for i in range(2*reddim)]
+    #plot(data.triang,list_fields, list_labels,'img/modes_pod')
+
 
     # Coordinates as LabelTensor
     coords = torch.tensor(coords.T,dtype=torch.float32)
     coords = LabelTensor(coords, ['x', 'y'])
 
     # Compute space-dependent exact correction terms
-    exact_correction = compute_exact_correction(pod, pod_big, snapshots_train)
+    exact_correction = compute_exact_correction(pod, snapshots_train)
 
     exact_correction = LabelTensor(exact_correction,
             [f's{i}' for i in range(Ndof)])
@@ -110,24 +122,25 @@ if __name__ == "__main__":
     ann_corr = DeepONetCorrNet(pod,
                                coords=coords,
                                interp=RBFBlock(),
-                               scaler=None
+                               scaler=None,
+                               mode_output_size=10
                                )
 
     if args.load:
-        id_ = 216
-        epochs = 1928
+        id_ = args.version
+        epochs = 5000
         num_batches = 5
 
         rom = CorrectedROM.load_from_checkpoint(
                 checkpoint_path=os.path.join(args.load,
                 f'lightning_logs/version_{id_}/checkpoints/epoch={epochs-1}-step={epochs*num_batches}.ckpt'),
                 problem=problem, reduction_network=pod,
-                interpolation_network=RBFBlock(),
+                interpolation_network=rbf,
                 correction_network=ann_corr)
         # fit the pod and RBF on train data
-        rom.neural_net["reduction_network"].fit(snapshots_train)
-        rom.neural_net["interpolation_network"].fit(params_train,
-                                                rom.neural_net["reduction_network"].reduce(snapshots_train))
+        #rom.neural_net["reduction_network"].fit(snapshots_train)
+        #rom.neural_net["interpolation_network"].fit(params_train,
+        #                                        rom.neural_net["reduction_network"].reduce(snapshots_train))
         rom.eval()
         #print(torch.min(rom.problem.conditions["correction"].output_points))
         #print(torch.max(rom.problem.conditions["correction"].output_points))
@@ -137,14 +150,18 @@ if __name__ == "__main__":
         modes = modes.detach().numpy()
         list_fields = [modes[:, i] for i in range(modes.shape[1])]
         list_labels = [f'Mode {i}' for i in range(modes.shape[1])]
-        plot(data.triang,list_fields, list_labels, 'img/transformed_modes_10kepochs')
+        plot(data.triang,list_fields, list_labels, filename='img/transformed_modes_10kepochs')
 
 
         # Evaluate the ROM on train and test
         predicted_snaps_train = rom(params_train)
         predicted_snaps_test = rom(params_test)
-        print('Train error = ', err(snapshots_train, predicted_snaps_train))
-        print('Test error = ', err(snapshots_test, predicted_snaps_test))
+        train_error = err(snapshots_train, predicted_snaps_train)
+        test_error = err(snapshots_test, predicted_snaps_test)
+        #print('Train error = ', err(snapshots_train, predicted_snaps_train))
+        #print('Test error = ', err(snapshots_test, predicted_snaps_test))
+        print(train_error,test_error)
+        #exit()
 
         # Plot the test results (POD-RBF and POD-RBF corrected)
         ind_test = 2
@@ -158,7 +175,7 @@ if __name__ == "__main__":
                 snap - pred_snap, snap-pred_pod_rbf]
         list_labels = ['Truth', 'Corrected POD-RBF', 'POD',
                 'Error Corrected', 'Error POD']
-        plot(data.triang,list_fields, list_labels, 'img/train_results_10kepochs')
+        plot(data.triang,list_fields, list_labels, filename='img/train_results_10kepochs')
 
         # Plot test correction (approximated and exact)
         coeff_orig = rom.neural_net["interpolation_network"](params_test)
@@ -168,35 +185,39 @@ if __name__ == "__main__":
         #if corr_scaler is not None:
         #    corr = corr_scaler.inverse_transform(corr)
         corr = corr.detach().numpy()[ind_test, :].reshape(-1)
-        exact_corr = compute_exact_correction(pod, pod_big, snapshots_test)
+        exact_corr = compute_exact_correction(pod, snapshots_test)
         if corr_scaler is not None:
             exact_corr = corr_scaler.transform(exact_corr)
         exact_corr = exact_corr[ind_test].detach().numpy().reshape(-1)
         list_fields = [corr, exact_corr, corr - exact_corr]
         list_labels = ['Approximated Correction', 'Exact Correction', 'Error']
-        plot(data.triang,list_fields, list_labels, 'img/correction_test_10kepochs')
+        plot(data.triang,list_fields, list_labels, filename='img/correction_test_10kepochs')
 
     else:
         rom = CorrectedROM(problem=problem,
                     reduction_network=pod,
-                    interpolation_network=RBFBlock(),
+                    interpolation_network=rbf,
                     correction_network=ann_corr,
                     optimizer=torch.optim.Adam,
-                    optimizer_kwargs={'lr': 1e-2},
+                    optimizer_kwargs={'lr': 3e-3},
                     #scheduler=torch.optim.lr_scheduler.MultiStepLR,
                     #scheduler_kwargs={'gamma': 0.1 ,'milestones': [4000]}
                     )
         # Fit the pod and RBF on train data
         #rom.neural_net["reduction_network"].fit(snapshots_train)
-        rom.neural_net["interpolation_network"].fit(params_train,
-                                                    rom.neural_net["reduction_network"].reduce(snapshots_train))
+        #rom.neural_net["interpolation_network"].fit(params_train,
+        #                                            rom.neural_net["reduction_network"].reduce(snapshots_train))
 
         # Train the ROM to learn the correction term
-        epochs = 10000
+        epochs = 5000
 
-        trainer = Trainer(solver=rom, max_epochs=epochs, accelerator='cpu',
-                default_root_dir=args.load, callbacks = [MetricTracker()],
-                          batch_size=80)
+        trainer = Trainer(solver=rom, 
+                          max_epochs=epochs, 
+                          accelerator='cpu',
+                          default_root_dir=args.load, 
+                          callbacks = [MetricTracker(),LogCallback()],
+                          batch_size=80,
+                          )
         trainer.train()
         
         pl = Plotter()

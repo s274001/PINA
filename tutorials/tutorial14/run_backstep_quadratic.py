@@ -31,6 +31,7 @@ if __name__ == "__main__":
     parser.add_argument('--bigdim', type=int, default=15, help='Bigger dimension')
     parser.add_argument('--field', type=str, default='mag(v)', help='Field to reduce')
     parser.add_argument('--load', help='Directory to save or load file', type=str)
+    parser.add_argument('--version', help='Model version', type=int)
 
     args = parser.parse_args()
     field = args.field
@@ -67,10 +68,7 @@ if __name__ == "__main__":
     pod.fit(snapshots_train)
     modes = pod.basis
 
-    pod_big = PODBlock(bigdim)
-    pod_big.fit(snapshots_train)
-
-    rbf = RBFBlock()
+    rbf = RBFBlock(kernel='linear')
     rbf.fit(params_train, pod.reduce(snapshots_train))
 
     ## Plot the modes
@@ -86,7 +84,7 @@ if __name__ == "__main__":
     coords = LabelTensor(coords, ['x', 'y'])
 
     # Compute space-dependent exact correction terms
-    exact_correction = compute_exact_correction(pod, pod_big, snapshots_train)
+    exact_correction = compute_exact_correction(pod, snapshots_train)
 
     exact_correction = LabelTensor(exact_correction,
             [f's{i}' for i in range(Ndof)])
@@ -117,7 +115,7 @@ if __name__ == "__main__":
                                 )
 
     if args.load:
-        id_ = 0
+        id_ = args.version
         epochs = 2
         num_batches = 1
 
@@ -131,17 +129,26 @@ if __name__ == "__main__":
 
         # Plot the operator columns
         modes = rom.neural_net["correction_network"].operator.T
-        print(modes.shape)
+        #print(modes.shape)
         modes = modes.detach().numpy()
         list_fields = [modes[:, i] for i in range(modes.shape[1])]
         list_labels = [f'Mode {i}' for i in range(modes.shape[1])]
-        plot(data.triang,list_fields, list_labels, 'img/quadratic_operator_columns')
+        vmin = min([field.min() for field in list_fields])
+        vmax = max([field.max() for field in list_fields])
+        #plot(data.triang,list_fields, list_labels, 
+        #     filename='img/quadratic_operator_columns',
+        #     vmin = vmin,
+        #     vmax = vmax)
 
         # Evaluate the ROM on train and test
         predicted_snaps_train = rom(params_train)
         predicted_snaps_test = rom(params_test)
-        print('Train error = ', err(snapshots_train, predicted_snaps_train))
-        print('Test error = ', err(snapshots_test, predicted_snaps_test))
+        train_error = err(snapshots_train, predicted_snaps_train)
+        test_error = err(snapshots_test, predicted_snaps_test)
+        #print('Train error = ', err(snapshots_train, predicted_snaps_train))
+        #print('Test error = ', err(snapshots_test, predicted_snaps_test))
+        print(train_error,test_error)
+        exit()
 
         # Plot the test results (POD-RBF and POD-RBF corrected)
         ind_test = 2
@@ -155,7 +162,7 @@ if __name__ == "__main__":
                 snap - pred_snap, snap-pred_pod_rbf]
         list_labels = ['Truth', 'Corrected POD-RBF', 'POD',
                 'Error Corrected', 'Error POD']
-        plot(data.triang,list_fields, list_labels, 'img/train_results_quadratic')
+        plot(data.triang,list_fields, list_labels, filename='img/train_results_quadratic')
 
         # Plot test correction (approximated and exact)
         coeff_orig = rom.neural_net["interpolation_network"](params_test)
@@ -171,7 +178,12 @@ if __name__ == "__main__":
         exact_corr = exact_corr[ind_test].detach().numpy().reshape(-1)
         list_fields = [corr, exact_corr, corr - exact_corr]
         list_labels = ['Approximated Correction', 'Exact Correction', 'Error']
-        plot(data.triang,list_fields, list_labels, 'img/correction_test_quadratic')
+        vmin = min([field.min() for field in list_fields])
+        vmax = max([field.max() for field in list_fields])
+        plot(data.triang,list_fields, list_labels, 
+             filename='img/correction_test_quadratic',
+             vmin = vmin,
+             vmax = vmax)
 
     else:
         rom = CorrectedROM(problem=problem,
