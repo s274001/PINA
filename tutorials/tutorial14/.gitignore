@@ -1,3 +1,11 @@
 img/
 lightning_logs/
 runs/
+.ipynb_checkpoints/
+sensitivity_analysis/
+quadnet/
+partial_data/
+full_data/
+casino/
+*.swp
+*log*

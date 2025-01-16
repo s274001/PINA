@@ -61,7 +61,7 @@ if __name__ == "__main__":
 
     # Divide dataset into training and testing
     params_train, params_test, snapshots_train, snapshots_test = train_test_split(
-            params, snapshots, test_size=0.2, shuffle=True, random_state=42)
+            params, snapshots, test_size=0.99, shuffle=True, random_state=42)
 
     # From numpy to LabelTensor
     params_train = LabelTensor(torch.tensor(params_train, dtype=torch.float32),
@@ -128,8 +128,8 @@ if __name__ == "__main__":
 
     if args.load:
         id_ = args.version
-        epochs = 5000
-        num_batches = 5
+        epochs = 10000
+        num_batches = 1
 
         rom = CorrectedROM.load_from_checkpoint(
                 checkpoint_path=os.path.join(args.load,
@@ -150,12 +150,21 @@ if __name__ == "__main__":
         modes = modes.detach().numpy()
         list_fields = [modes[:, i] for i in range(modes.shape[1])]
         list_labels = [f'Mode {i}' for i in range(modes.shape[1])]
-        plot(data.triang,list_fields, list_labels, filename='img/transformed_modes_10kepochs')
+        #plot(data.triang,list_fields, list_labels, filename='img/transformed_modes_10kepochs')
+        for i in range(reddim):
+            list_fields = [modes[:, i].reshape(-1)]
+            #list_fields = [modes.detach().numpy()[:, i].reshape(-1)
+            #        for i in range(reddim)]
+            list_labels = [f'Corrected mode {i+1}']# for i in range(reddim)]
+            plot(data.triang,list_fields, list_labels,filename=f'img/modes{i+1}_deep_sparse')
+        #exit()
 
 
         # Evaluate the ROM on train and test
         predicted_snaps_train = rom(params_train)
         predicted_snaps_test = rom(params_test)
+        print(params_test[10])
+        np.save('deep_prediction_10',predicted_snaps_test[10].detach().numpy())
         train_error = err(snapshots_train, predicted_snaps_train)
         test_error = err(snapshots_test, predicted_snaps_test)
         #print('Train error = ', err(snapshots_train, predicted_snaps_train))
@@ -199,7 +208,7 @@ if __name__ == "__main__":
                     interpolation_network=rbf,
                     correction_network=ann_corr,
                     optimizer=torch.optim.Adam,
-                    optimizer_kwargs={'lr': 3e-3},
+                    optimizer_kwargs={'lr': 7e-3},
                     #scheduler=torch.optim.lr_scheduler.MultiStepLR,
                     #scheduler_kwargs={'gamma': 0.1 ,'milestones': [4000]}
                     )
@@ -209,7 +218,7 @@ if __name__ == "__main__":
         #                                            rom.neural_net["reduction_network"].reduce(snapshots_train))
 
         # Train the ROM to learn the correction term
-        epochs = 5000
+        epochs = 10000
 
         trainer = Trainer(solver=rom, 
                           max_epochs=epochs, 

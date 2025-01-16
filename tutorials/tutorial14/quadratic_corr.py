@@ -33,7 +33,7 @@ class QuadraticCorrNet(BaseCorrNet):
         '''
         R_mat = corrections
         D_mat = self.D_matrix(self.coeffs)
-        if torch.linalg.cond(D_mat) >= 1e5:
+        if torch.linalg.cond(D_mat) >= 1e4:
             driver = 'gelsd'
         else:
             driver = 'gelsy'
@@ -53,6 +53,9 @@ class QuadraticCorrNet(BaseCorrNet):
         D_mat = self.D_matrix(coeff_test)
         pred = D_mat@self.operator
         return pred
+    
+    def C(self,input_):
+        return self.operator.T
 
 
 

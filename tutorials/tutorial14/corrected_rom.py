@@ -65,6 +65,24 @@ class CorrectedROM(SupervisedSolver):
 
         return pod_term + correction_term
 
+    def _forward_no_interp(self, input_params, snaps):
+        '''
+        Compute the ROM solution, by summing the POD term and the correction term.
+        '''
+        reduction_network = self.neural_net["reduction_network"]
+        correction_network = self.neural_net["correction_network"]
+
+        # project snapshots
+        coeff = reduction_network.reduce(snaps)
+
+        # POD term is just expand(reduce(snapshots)), we do not do interpolation
+        pod_term = reduction_network.expand(coeff)
+        correction_term = correction_network(input_params,coeff)
+        if correction_network.scaler is not None:
+            correction_term = correction_network.scaler.inverse_transform(correction_term)
+
+        return pod_term + correction_term
+
     def loss_data(self, input_pts, output_pts):
         interpolation_network = self.neural_net["interpolation_network"]
         correction_network = self.neural_net["correction_network"]
@@ -77,17 +95,23 @@ class CorrectedROM(SupervisedSolver):
         
         loss_correction = self.loss(approx_correction, exact_correction)
 
-        # orthonormalisation loss
-        #modes_corr = correction_network.transformed_modes()
-        #loss_orthog = torch.norm(torch.matmul(modes_corr.T,modes_corr)-torch.eye(correction_network.reduced_dim))
+        # orthogonal components loss
+        V = correction_network.modes
+        Vbar = correction_network.C(input_pts)
+        # Vbar = correction_network.operator.T
+        loss_orthog = torch.norm(V.T@Vbar)
 
         # importance of correction over orthonormalisation
-        #beta = 1
-        #self.log("loss_orthon", float(loss_orthog), prog_bar=True, logger=True)
-        #self.log("loss_corr", float(loss_correction), prog_bar=True, logger=True)
-        
+        beta = 0.001
+        self.log("loss_orthon", float(loss_orthog), prog_bar=True, logger=True)
+        self.log("loss_corr", float(loss_correction), prog_bar=True, logger=True)
+
+        # norm1 = torch.linalg.norm(approx_correction-exact_correction,dim=-1).mean()
+        # norm2 = torch.linalg.norm(exact_correction,dim=-1).mean()
+        # other_term = torch.nn.functional.relu(norm1 - norm2)
+
         #return beta * loss_correction #+ (1-beta) * loss_orthog
-        return  loss_correction #+ (1-beta) * loss_orthog
+        return  loss_correction + beta * loss_orthog #+ other_term
 
 
     @property

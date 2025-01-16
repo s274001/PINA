@@ -4,6 +4,8 @@ import math
 import warnings
 from itertools import combinations_with_replacement
 import torch
+
+from pina.label_tensor import LabelTensor
 from ...utils import check_consistency
 
 
@@ -144,9 +146,12 @@ class RBFBlock(torch.nn.Module):
         self.y = None
         self.d = None
         # initialize attributes for the fitted model
-        self._shift = None
-        self._scale = None
-        self._coeffs = None
+        self.register_buffer('_shift' , None)
+        self.register_buffer('_scale' , None)
+        self.register_buffer('_coeffs' , None)
+        # self._shift = None
+        # self._scale = None
+        # self._coeffs = None
 
     @property
     def smoothing(self):
@@ -450,4 +455,15 @@ class RBFBlock(torch.nn.Module):
 
             raise ValueError(msg) from e
 
+        if isinstance(shift,LabelTensor):
+            # shift.labels = [f'shift{i}' for i in range(shift.shape[-1])]
+            shift = shift.tensor
+        if isinstance(scale,LabelTensor):
+            # scale.labels = [f'scale{i}' for i in range(scale.shape[-1])]
+            scale = scale.tensor
+        if isinstance(coeffs,LabelTensor):
+            # coeffs.labels = [f'coeffs{i}' for i in range(coeffs.shape[-1])]
+            coeffs = coeffs.tensor
+
         return shift, scale, coeffs
+

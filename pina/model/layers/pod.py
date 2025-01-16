@@ -2,6 +2,8 @@
 
 from abc import ABCMeta, abstractmethod
 import torch
+
+from pina.label_tensor import LabelTensor
 from .stride import Stride
 from .utils_convolution import optimizing
 
@@ -27,9 +29,12 @@ class PODBlock(torch.nn.Module):
         """
         super().__init__()
         self.__scale_coefficients = scale_coefficients
-        self._basis = None
-        self._values = None
-        self._scaler = None
+        self.register_buffer('_basis', None)
+        self.register_buffer('_values', None)
+        self.register_buffer('_scaler', None)
+        # self._basis= None
+        # # self._values = None
+        # self._scaler = None
         self._rank = rank
 
     @property
@@ -76,8 +81,8 @@ class PODBlock(torch.nn.Module):
             return
 
         return {
-            "mean": self._scaler["mean"][: self.rank],
-            "std": self._scaler["std"][: self.rank],
+            "mean": self._scaler["mean"][: self.rank].squeeze(),
+            "std": self._scaler["std"][: self.rank].squeeze(), #the squeeze method is only for the case where _scaler is a labeltensor
         }
 
     @property
@@ -112,10 +117,11 @@ class PODBlock(torch.nn.Module):
 
         :param torch.Tensor coeffs: The coefficients to be scaled.
         """
-        self._scaler = {
-            "std": torch.std(coeffs, dim=1),
-            "mean": torch.mean(coeffs, dim=1),
-        }
+        self._scaler = LabelTensor(torch.stack([torch.std(coeffs, dim=1), torch.std(coeffs, dim=1)]).T,['std','mean'])
+        # self._scaler = {
+        #     "std": torch.std(coeffs, dim=1),
+        #     "mean": torch.mean(coeffs, dim=1),
+        # }
 
     def _fit_pod(self, X):
         """
@@ -128,6 +134,13 @@ class PODBlock(torch.nn.Module):
         else:
             self._basis, self._values, _ = torch.svd_lowrank(X.T, q=X.shape[0])#[0].T
             self._basis = self._basis.T
+            # assign labels in case these are LabelTensors
+            if isinstance(self._basis,LabelTensor):
+                # self._basis.labels = [f'u{i}' for i in range(self._basis.shape[-1])]
+                self._basis = self._basis.tensor
+            if isinstance(self._values,LabelTensor):
+                # self._values.labels = [f'v{i}' for i in range(self._values.shape[-1])]
+                self._values = self._values.tensor
 
     def forward(self, X):
         """

@@ -133,7 +133,7 @@ class LpLoss(LossInterface):
         """
         loss = torch.linalg.norm((input - target), ord=self.p, dim=-1)
         if self.relative:
-            loss = loss / torch.linalg.norm(input, ord=self.p, dim=-1)
+            loss = loss / torch.linalg.norm(target, ord=self.p, dim=-1)
         return self._reduction(loss)
 
 

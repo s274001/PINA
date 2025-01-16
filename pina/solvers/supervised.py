@@ -118,6 +118,7 @@ class SupervisedSolver(SolverInterface):
         :return: The sum of the loss functions.
         :rtype: LabelTensor
         """
+        # print(batch)
 
         condition_idx = batch["condition"]
 
@@ -127,6 +128,7 @@ class SupervisedSolver(SolverInterface):
             condition = self.problem.conditions[condition_name]
             pts = batch["pts"]
             out = batch["output"]
+            # print(out.labels)
 
             if condition_name not in self.problem.conditions:
                 raise RuntimeError("Something wrong happened.")
@@ -137,6 +139,10 @@ class SupervisedSolver(SolverInterface):
                     f"{type(self).__name__} works only in data-driven mode."
                 )
 
+            # print(condition_idx)
+            # print(condition_id)
+            # print(condition_idx == condition_id)
+            # print(len(condition_idx == condition_id))
             output_pts = out[condition_idx == condition_id]
             input_pts = pts[condition_idx == condition_id]
 

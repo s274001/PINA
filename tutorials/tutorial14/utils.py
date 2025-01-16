@@ -4,11 +4,12 @@ import numpy as np
 matplotlib.rcParams['text.usetex'] = True
 matplotlib.rcParams['font.size'] = 18 
 matplotlib.rcParams['font.family'] = 'serif'
-matplotlib.rcParams['font.serif'] = ['Computer Modern']
+matplotlib.rcParams['font.serif'] = ['Computer Modern Roman']
+matplotlib.rcParams['image.cmap'] = 'RdBu_r'
 
 def plot(triang, list_fields, list_labels,
          vmin=None, vmax=None, filename=None,
-         figsize=None):
+         figsize=None,**kwargs):
     if vmin is not None and vmax is not None:
         levels = np.linspace(vmin-0.01*np.abs(vmin), vmax+0.01*np.abs(vmax), 20)
     elif vmin is None or vmax is None:
@@ -22,7 +23,7 @@ def plot(triang, list_fields, list_labels,
         for field, label, ax in zip(list_fields, list_labels, axs):
 
             a0 = ax.tricontourf(triang, field,
-                    levels=levels, cmap='viridis')
+                    levels=levels, norm=matplotlib.colors.TwoSlopeNorm(0,vmin=vmin,vmax=vmax),**kwargs)
             ax.set_title(label)
         fig.colorbar(a0, ax=axs.ravel().tolist())
         #fig.tight_layout()
@@ -34,7 +35,7 @@ def plot(triang, list_fields, list_labels,
         fig, ax = plt.subplots(1, 1,
                 figsize=(5, 3))
         a0 = ax.tricontourf(triang, list_fields[0],
-                    levels=levels, cmap='viridis')
+                    levels=levels,**kwargs)
         ax.set_title(list_labels[0])
         fig.colorbar(a0, ax=ax)
         fig.tight_layout()
